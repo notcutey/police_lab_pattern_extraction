@@ -1,0 +1,90 @@
+[
+  {
+    "batch": 10,
+    "sample_in_batch": 0,
+    "global_idx": 576,
+    "file": "6700-09-0524_1.jpg",
+    "attn_temp": 1.0,
+    "weight_img": 0.8,
+    "weight_txt": 0.2,
+    "TOP_N": 5,
+    "norm_img_final": 1.0,
+    "norm_text_mean": 1.0,
+    "norm_fused": 1.0,
+    "cos_img_txt": -0.027493314817547798,
+    "cos_img_fused": 0.9697682857513428,
+    "cos_txt_fused": 0.21727332472801208,
+    "top_proto_idx": [
+      170,
+      184,
+      240,
+      172,
+      258
+    ],
+    "top_proto_attn": [
+      0.004106898792088032,
+      0.004072501324117184,
+      0.004049309529364109,
+      0.004037055652588606,
+      0.004032575525343418
+    ],
+    "top_labels": [
+      171,
+      185,
+      241,
+      173,
+      259
+    ],
+    "top_texts": [
+      "It has the form of a rectangle containing an inner rectangle.",
+      "The shape is an irregular rectangle with another shape inside it.",
+      "It has the form of an oval with one side flattened.",
+      "A circle is located inside a rectangle.",
+      "The shape of a rounded bullet, a partial circle with one rounded and one straight side, is observed."
+    ]
+  },
+  {
+    "batch": 10,
+    "sample_in_batch": 1,
+    "global_idx": 577,
+    "file": "6700-09-0646_1.jpg",
+    "attn_temp": 1.0,
+    "weight_img": 0.8,
+    "weight_txt": 0.2,
+    "TOP_N": 5,
+    "norm_img_final": 1.0,
+    "norm_text_mean": 0.9999999403953552,
+    "norm_fused": 1.0,
+    "cos_img_txt": 0.014714033342897892,
+    "cos_img_fused": 0.9703574776649475,
+    "cos_txt_fused": 0.25592583417892456,
+    "top_proto_idx": [
+      232,
+      71,
+      225,
+      233,
+      165
+    ],
+    "top_proto_attn": [
+      0.004234426189213991,
+      0.004201672505587339,
+      0.004191577434539795,
+      0.004116902127861977,
+      0.00406094454228878
+    ],
+    "top_labels": [
+      233,
+      72,
+      226,
+      234,
+      166
+    ],
+    "top_texts": [
+      "A double circle is present.",
+      "The pattern is a regular array of circles.",
+      "The shape is a circle.",
+      "The shape of concentric circles is observed.",
+      "Rectangle"
+    ]
+  }
+]
