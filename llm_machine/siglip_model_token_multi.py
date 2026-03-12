@@ -15,7 +15,7 @@ def compute_class_balanced_weights_from_counts(
     device: Optional[torch.device] = None,
 ) -> torch.Tensor:
     """
-    Class-Balanced Weight 계산 (변경 없음)
+    Compute class-balanced weights (unchanged).
     """
     if device is None:
         device = (
@@ -31,19 +31,19 @@ def compute_class_balanced_weights_from_counts(
     den = 1.0 - torch.pow(torch.tensor(beta, dtype=torch.float32, device=device), counts)
     w = num / torch.clamp(den, min=1e-12)
 
-    # 평균 1 근처로 스케일링
+    # Scale weights so that the average is close to 1
     w = w * (w.numel() / w.sum().clamp(min=1e-12))
 
-    # 클램핑
+    # Clamp the weight range
     w = torch.clamp(w, min=w_min, max=w_max)
     return w
 
 
 class TextSelfAttentionBlock(nn.Module):
     """
-    텍스트 임베딩용 Transformer 블록
+    Transformer block for text embeddings.
     - Self-Attention + FFN + LayerNorm + Residual
-    - 입력/출력: (M, D) 또는 (B, M, D)
+    - Input/Output: (M, D) or (B, M, D)
     """
 
     def __init__(
@@ -57,7 +57,7 @@ class TextSelfAttentionBlock(nn.Module):
         self.dim = dim
         self.num_heads = num_heads
 
-        # (B, M, D) 포맷 사용
+        # Use (B, M, D) format
         self.ln1 = nn.LayerNorm(dim)
         self.self_attn = nn.MultiheadAttention(
             embed_dim=dim,
@@ -78,7 +78,7 @@ class TextSelfAttentionBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        x: (M, D) 또는 (B, M, D)
+        x: (M, D) or (B, M, D)
         """
         squeeze_batch = False
         if x.dim() == 2:
@@ -96,20 +96,20 @@ class TextSelfAttentionBlock(nn.Module):
         x = x + self.mlp(x_ln2)
 
         if squeeze_batch:
-            x = x.squeeze(0)  # 다시 (M, D)
+            x = x.squeeze(0)  # Back to (M, D)
 
         return x
 
 
 class CrossAttention(nn.Module):
     """
-    Multi-head Cross-Attention (raw score만 반환)
-    - 입력:
+    Multi-head Cross-Attention that returns only raw scores.
+    - Input:
         q: (B, Nq, D)
         k: (B, Nk, D)
-        v: (B, Nk, D)   # 호환성 위해 받지만 현재는 사용하지 않음
-    - 출력:
-        scores_mean: (B, Nq, Nk)  # head 평균 raw attention score
+        v: (B, Nk, D)   # accepted for interface compatibility but not currently used
+    - Output:
+        scores_mean: (B, Nq, Nk)  # raw attention scores averaged across heads
     """
     def __init__(
         self,
@@ -126,7 +126,7 @@ class CrossAttention(nn.Module):
 
         self.q = nn.Linear(dim, dim, bias=qkv_bias)
         self.k = nn.Linear(dim, dim, bias=qkv_bias)
-        self.v = nn.Linear(dim, dim, bias=qkv_bias)  # 정의만, 현재 사용 X
+        self.v = nn.Linear(dim, dim, bias=qkv_bias)  # Defined only, not used currently
 
     def forward(
         self,
@@ -139,14 +139,14 @@ class CrossAttention(nn.Module):
         H = self.num_heads
         Dh = D // H
 
-        # Q, K projection + head 분리
+        # Q, K projection + split into heads
         q = self.q(q).reshape(B, Nq, H, Dh).permute(0, 2, 1, 3)   # (B, H, Nq, Dh)
         k = self.k(k).reshape(B, Nk, H, Dh).permute(0, 2, 1, 3)   # (B, H, Nk, Dh)
 
-        # scaled dot-product (softmax 없음)
+        # Scaled dot-product without softmax
         scores = (q @ k.transpose(-2, -1)) * self.scale           # (B, H, Nq, Nk)
 
-        # head 평균
+        # Average over heads
         scores_mean = scores.mean(dim=1)                          # (B, Nq, Nk)
         return scores_mean
 
@@ -162,25 +162,25 @@ class VisionTextSigLIP(nn.Module):
         llm_hidden_size: Optional[int] = None,
         sync_text_device: bool = True,
 
-        # --- Vision projector 옵션 ---
+        # --- Vision projector options ---
         use_vision_proj: bool = True,
         vision_proj_type: str = "linear",   # "linear" | "mlp"
         vision_proj_hidden: Optional[int] = None,
         use_vision_residual: bool = False,
         vision_dropout: float = 0.0,
 
-        # --- Cross-Attention 옵션 ---
+        # --- Cross-Attention options ---
         use_xattn: bool = True,
         xattn_dropout: float = 0.0,
 
-        # --- Asymmetric Loss (멀티라벨) 옵션 ---
+        # --- Asymmetric Loss (multi-label) options ---
         use_asl: bool = True,
         asl_gamma_pos: float = 0.0,
         asl_gamma_neg: float = 4.0,
         asl_clip: float = 0.05,
         asl_eps: float = 1e-8,
 
-        # --- Class-Balanced Weight 옵션 ---
+        # --- Class-Balanced Weight options ---
         use_cbw: bool = True,
         class_weights: Optional[torch.Tensor] = None,
     ):
@@ -204,7 +204,7 @@ class VisionTextSigLIP(nn.Module):
             nn.LayerNorm(proj_out_dim),
         )
 
-        # ───────── Vision projector ─────
+        # ───────── Vision projector ─────────
         self.use_vision_proj = use_vision_proj
         self.use_vision_residual = use_vision_residual
 
@@ -234,7 +234,7 @@ class VisionTextSigLIP(nn.Module):
             self.vision_residual = None
             self.vision_proj_type = "none"
 
-        # ───────── Cross-Attention 설정 ─────────
+        # ───────── Cross-Attention configuration ─────────
         self.use_xattn = use_xattn
         self.xattn_dropout = xattn_dropout
         if self.use_xattn:
@@ -247,7 +247,8 @@ class VisionTextSigLIP(nn.Module):
             self.cross_attn = None
 
         # ───────── Text Self-Attention Block ─────────
-        # 문양 텍스트 프로토타입에 대해 Self-Attn + FFN + LayerNorm + Residual 수행
+        # Apply Self-Attention + FFN + LayerNorm + Residual
+        # to pattern text prototypes
         self.use_text_self_attn = True
         if self.use_text_self_attn:
             self.text_self_attn_block = TextSelfAttentionBlock(
@@ -259,12 +260,12 @@ class VisionTextSigLIP(nn.Module):
         else:
             self.text_self_attn_block = None
 
-        # ───────── Temperature 파라미터 ─────────
+        # ───────── Temperature parameter ─────────
         self.log_temp = nn.Parameter(
             torch.log(torch.tensor(temperature_init, dtype=torch.float32))
         )
 
-        # ───────── Text encoder 디바이스 동기화 ─────────
+        # ───────── Synchronize text encoder device ─────────
         if sync_text_device:
             vt_dev = next(self.parameters()).device
             try:
@@ -290,7 +291,7 @@ class VisionTextSigLIP(nn.Module):
             self.register_buffer("class_weights", None)
 
     # ==============================
-    #   Helper / encode 함수들
+    #   Helper / encoding functions
     # ==============================
 
     @torch.no_grad()
@@ -311,19 +312,19 @@ class VisionTextSigLIP(nn.Module):
     def _to_fp32(self, x: torch.Tensor) -> torch.Tensor:
         return x.float()
 
-    # --------- (중요) Vision 토큰 4개까지 처리하도록 수정 ---------
+    # --------- Important: modified to support up to 4 vision tokens ---------
     def _project_image_feats(self, image_feats: torch.Tensor) -> torch.Tensor:
         """
         image_feats:
-            - (B, Dv) : 기존 single global vector
-            - (B, Nq, Dv) : 한 이미지당 Nq개 토큰 (지금은 Nq=4)
-        반환:
-            - (B, D) 또는 (B, Nq, D)  (proj_out_dim = D)
+            - (B, Dv) : original single global vector
+            - (B, Nq, Dv) : Nq tokens per image (currently Nq=4)
+        return:
+            - (B, D) or (B, Nq, D)  (proj_out_dim = D)
         """
         v = image_feats
 
         if self.use_vision_proj and (self.vision_proj is not None):
-            # target dtype
+            # Target dtype
             if isinstance(self.vision_proj, nn.Sequential):
                 first_linear = next(m for m in self.vision_proj if isinstance(m, nn.Linear))
                 target_dtype = first_linear.weight.dtype
@@ -331,7 +332,7 @@ class VisionTextSigLIP(nn.Module):
                 target_dtype = self.vision_proj.weight.dtype
             v = v.to(target_dtype)
 
-            v_in = v  # residual용 저장
+            v_in = v  # Save for residual connection
 
             if v.dim() == 2:
                 # (B, Dv)
@@ -358,7 +359,7 @@ class VisionTextSigLIP(nn.Module):
                 else:
                     v = v + v_in
 
-        # 필요하면 normalize 가능
+        # Normalize if needed
         # v = F.normalize(v, dim=-1)
         return v
 
@@ -366,12 +367,12 @@ class VisionTextSigLIP(nn.Module):
         t_raw = self.text_encoder.encode_text(input_ids, attention_mask)  # (M, H_lm)
         t_raw = t_raw.to(next(self.text_proj.parameters()).dtype)
         t = self.text_proj(t_raw)                                         # (M, D)
-        # 마찬가지로 필요시 normalize
+        # Normalize if needed
         # t = F.normalize(t, dim=-1)
         return t
 
     # ==============================
-    #   Target 빌더 (라벨 → (B,M) 원핫)
+    #   Target builder (labels -> (B, M) one-hot)
     # ==============================
     @staticmethod
     def _build_targets_from_labels(
@@ -400,7 +401,7 @@ class VisionTextSigLIP(nn.Module):
         return Y
 
     # ==============================
-       #   Asymmetric Loss (멀티라벨)
+    #   Asymmetric Loss (multi-label)
     # ==============================
     def _asymmetric_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         eps = self.asl_eps
@@ -437,7 +438,7 @@ class VisionTextSigLIP(nn.Module):
         return loss.mean()
 
     # ==============================
-    #   Cross-Attention (이미지 토큰 → 문양 텍스트)
+    #   Cross-Attention (image tokens -> pattern text)
     # ==============================
     def _cross_attend_image_to_text(
         self,
@@ -445,33 +446,32 @@ class VisionTextSigLIP(nn.Module):
         t_txt: torch.Tensor,     # (M, D)
     ) -> torch.Tensor:
         """
-        Q = 이미지 토큰들 [B, Nq, D]
-        K,V = 문양 텍스트 [B, M, D] (B 방향 broadcast)
+        Q = image tokens [B, Nq, D]
+        K, V = pattern text [B, M, D] with broadcasting along batch dimension
 
-        반환:
-        - scores: (B, M)  # Nq 토큰 중 최대값 기반 max pooling 사용
+        return:
+        - scores: (B, M)  # max pooling across Nq tokens
         """
         B, Nq, D = v_tokens.shape
         M = t_txt.shape[0]
 
         q = v_tokens                               # (B, Nq, D)
-        k = t_txt.unsqueeze(0).expand(B, M, D)     # (B, M, D)
-        v = k                                      # 인터페이스용
+        k = t_txt.unsqueeze(0).expand(B, M, D)    # (B, M, D)
+        v = k                                      # For interface compatibility
 
-        attn_scores = self.cross_attn(q, k, v)      # (B, Nq, M)
+        attn_scores = self.cross_attn(q, k, v)    # (B, Nq, M)
 
-        # ★ 평균 ➜ max pooling (MIL 구조)
-        scores, _ = attn_scores.max(dim=1)          # (B, M)
+        # Use max pooling instead of mean pooling (MIL structure)
+        scores, _ = attn_scores.max(dim=1)         # (B, M)
 
         return scores
-
 
     # ==============================
     #   Forward
     # ==============================
     def forward(
         self,
-        image_feats: torch.Tensor,         # (B, Dv) 또는 (B, Nq, Dv)  ← 지금은 (B,4,1024)
+        image_feats: torch.Tensor,         # (B, Dv) or (B, Nq, Dv)  ← currently (B, 4, 1024)
         text_input_ids: torch.Tensor,
         text_attention_mask: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
@@ -483,30 +483,29 @@ class VisionTextSigLIP(nn.Module):
         vt_dev = next(self.parameters()).device
         image_feats = image_feats.to(vt_dev, non_blocking=True)
 
-        # 1) 이미지 토큰 임베딩 v_tokens
+        # 1) Image token embeddings v_tokens
         v = self._project_image_feats(image_feats)       # (B, D) or (B, Nq, D)
 
         if v.dim() == 2:
-            # 기존 single vector 구조도 호환
+            # Keep compatibility with the original single-vector structure
             v_tokens = v.unsqueeze(1)                    # (B, 1, D)
         else:
             v_tokens = v                                 # (B, Nq, D)  ← Nq=4
         # if v_tokens.size(1) > 1:
         #     v_tokens = v_tokens.mean(dim=1, keepdim=True)   # (B, 1, D)
 
-
-        # 2) 문양 텍스트 임베딩 프로토타입 t
+        # 2) Pattern text embedding prototypes t
         t = self.encode_texts(text_input_ids, text_attention_mask)  # (M, D)
 
         # 2-1) Text Self-Attention + FFN + LayerNorm + Residual
         if getattr(self, "use_text_self_attn", False) and (self.text_self_attn_block is not None):
             t = self.text_self_attn_block(t)  # (M, D) -> (M, D)
 
-        # 3) cross-attention raw score → logits
+        # 3) Cross-attention raw score -> logits
         if self.use_xattn and (self.cross_attn is not None):
             scores = self._cross_attend_image_to_text(v_tokens, t)   # (B, M)
         else:
-            # xattn 끄면 그냥 점곱 사용 (옵션)
+            # If xattn is disabled, use plain dot product instead (optional)
             # v_tokens: (B, Nq, D), t: (M, D)
             B, Nq, D = v_tokens.shape
             M = t.shape[0]
@@ -522,7 +521,7 @@ class VisionTextSigLIP(nn.Module):
             "temp": temp,
         }
 
-        # 4) target 없으면 label 리스트로부터 생성
+        # 4) Build targets from label lists if targets are not provided
         if targets is None and (image_label_lists is not None) and (text_labels is not None):
             if isinstance(text_labels, torch.Tensor):
                 text_labels = text_labels.detach().cpu().tolist()
@@ -554,8 +553,7 @@ class VisionTextSigLIP(nn.Module):
             out["loss"] = loss
 
         if return_embeddings:
-            out["vision_emb"] = v_tokens    # (B, Nq, D)  ← 토큰 단위 임베딩
+            out["vision_emb"] = v_tokens    # (B, Nq, D)  ← token-level embeddings
             out["text_emb"] = t             # (M, D)
 
         return out
-
