@@ -6,17 +6,18 @@ import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-# --------- 유틸 ---------
+# --------- Utility functions ---------
 def _to_label_set(x: Any) -> Set[Hashable]:
+    # Convert different label formats into a set of labels
     if x is None: return set()
     if isinstance(x, (str, int)): return {x}
     if isinstance(x, set): return x
     return set(x)
 
-# 이미지 멀티라벨 vs 텍스트 싱글라벨 → 타깃 행렬
+# Build target matrix for multi-label images vs single-label texts
 def build_targets_imgmulti_textsingle(
-    img_label_sets: List[Set[Hashable]],  # 길이 B, 각 원소는 set(...)
-    txt_labels: List[Hashable],           # 길이 M, 각 원소는 단일 라벨
+    img_label_sets: List[Set[Hashable]],  # length B, each element is set(...)
+    txt_labels: List[Hashable],           # length M, each element is a single label
 ) -> torch.Tensor:
     B, M = len(img_label_sets), len(txt_labels)
 
@@ -29,7 +30,7 @@ def build_targets_imgmulti_textsingle(
                 Y[i, j] = 1.0
     return Y
 
-# --------- 이미지(멀티라벨) ---------
+# --------- Image dataset (multi-label) ---------
 class ImageDatasetMultiLabel(Dataset):
     """
     items_img: [{"image_path": str, "labels": list|set|str|int}, ...]
@@ -56,7 +57,7 @@ class ImageDatasetMultiLabel(Dataset):
 @dataclass
 class ImageBatchMulti:
     images: torch.Tensor                 # [B, 3, H, W]
-    label_sets: List[Set[Hashable]]      # 길이 B
+    label_sets: List[Set[Hashable]]      # length B
 
 class ImageCollatorMulti:
     def __call__(self, batch: List[Dict[str, Any]]) -> ImageBatchMulti:
@@ -64,7 +65,7 @@ class ImageCollatorMulti:
         label_sets = [b["labels"] for b in batch]
         return ImageBatchMulti(images=images, label_sets=label_sets)
 
-# --------- 텍스트(싱글라벨) ---------
+# --------- Text dataset (single-label) ---------
 class TextDatasetSingleLabel(Dataset):
     """
     items_txt: [{"text": str, "label": str|int}, ...]
@@ -82,8 +83,8 @@ class TextDatasetSingleLabel(Dataset):
 class TextBatchSingle:
     input_ids: torch.Tensor              # [M, L]
     attention_mask: torch.Tensor         # [M, L]
-    texts: List[str]                     # 길이 M
-    labels: List[Hashable]               # 길이 M (싱글라벨)
+    texts: List[str]                     # length M
+    labels: List[Hashable]               # length M (single-label)
 
 class TextCollatorSingle:
     def __init__(self, tokenizer: AutoTokenizer, max_length: int = 128):
