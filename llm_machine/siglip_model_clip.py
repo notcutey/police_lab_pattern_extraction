@@ -32,28 +32,28 @@ class VisionTextSigLIP(nn.Module):
     def __init__(
         self,
         token_model: Token,
-        text_encoder: LLMTextEncoder,                      # detect_hidden_size(), encode_text(), tokenizer, device 보유
-        vision_dim: int = 1024,                            # Token.forward_test 출력 차원 Dv
-        proj_out_dim: int = 1024,                          # 공유 임베딩 차원 D
+        text_encoder: LLMTextEncoder,                      # provides detect_hidden_size(), encode_text(), tokenizer, and device
+        vision_dim: int = 1024,                            # output dimension Dv from Token.forward_test
+        proj_out_dim: int = 1024,                          # shared embedding dimension D
         temperature_init: float = 0.07,
         llm_hidden_size: Optional[int] = None,
         sync_text_device: bool = True,
 
-        # --- Vision projector 옵션 ---
+        # --- Vision projector options ---
         use_vision_proj: bool = True,
-        vision_proj_type: str = "linear",                  # "linear" | "mlp" --> linear를 통한 안정성 확보
+        vision_proj_type: str = "linear",                  # "linear" | "mlp" --> use linear for better stability
         vision_proj_hidden: Optional[int] = None,
         use_vision_residual: bool = False,
         vision_dropout: float = 0.0,
 
-        # --- Asymmetric Loss(멀티라벨) 옵션 ---
+        # --- Asymmetric Loss (multi-label) options ---
         use_asl: bool = True,
         asl_gamma_pos: float = 0.0,
         asl_gamma_neg: float = 4.0,
         asl_clip: float = 0.05,
         asl_eps: float = 1e-8,
 
-        # --- Class-Balanced Weight 옵션 ---
+        # --- Class-Balanced Weight options ---
         use_cbw: bool = True,
         class_weights: Optional[torch.Tensor] = None,
     ):
@@ -65,8 +65,8 @@ class VisionTextSigLIP(nn.Module):
         if llm_hidden_size is None:
             llm_hidden_size = self.text_encoder.detect_hidden_size()
 
-        # ── Text projector (다단계 축소) ───────────────────────────────
-        # 예: 3072 -> 2048 -> 1024
+        # ── Text projector (multi-stage dimensionality reduction) ───────────────────────────────
+        # Example: 3072 -> 2048 -> 1024
         self.text_proj = nn.Sequential(
             nn.Linear(llm_hidden_size, 2048),
             nn.GELU(),
@@ -75,7 +75,7 @@ class VisionTextSigLIP(nn.Module):
             nn.LayerNorm(proj_out_dim),
         )
 
-        # ── Vision projector (옵션) ────────────────────────────────
+        # ── Vision projector (optional) ────────────────────────────────
         self.use_vision_proj = use_vision_proj
         self.use_vision_residual = use_vision_residual
         self.vision_dim = vision_dim
@@ -110,7 +110,7 @@ class VisionTextSigLIP(nn.Module):
         self.log_temp = nn.Parameter(torch.log(torch.tensor(temperature_init, dtype=torch.float32)))
 
         if sync_text_device:
-            vt_dev = next(self.parameters()).device  # 아직 CPU일 수 있음
+            vt_dev = next(self.parameters()).device  # may still be on CPU at this stage
             try:
                 self.text_encoder.to(vt_dev)
                 if hasattr(self.text_encoder, "device"):
@@ -198,7 +198,6 @@ class VisionTextSigLIP(nn.Module):
     def _asymmetric_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         eps = self.asl_eps
 
-
         x_sigmoid = torch.sigmoid(logits)          # p
         xs_pos = x_sigmoid                         # p
         xs_neg = 1.0 - x_sigmoid                   # 1-p
@@ -209,7 +208,7 @@ class VisionTextSigLIP(nn.Module):
         gamma_pos = self.asl_gamma_pos
         gamma_neg = self.asl_gamma_neg
         pos_weight = torch.pow(1.0 - xs_pos, gamma_pos)   # (1-p)^γ+
-        neg_weight = torch.pow(1.0 - xs_neg, gamma_neg)   # ≈ p^γ-
+        neg_weight = torch.pow(1.0 - xs_neg, gamma_neg)   # approximately p^γ-
         if self.use_cbw and (self.class_weights is not None):
             cw = self.class_weights.to(logits.dtype).to(logits.device).unsqueeze(0).expand_as(targets)
         else:
