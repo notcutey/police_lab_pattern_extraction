@@ -14,17 +14,17 @@ from tqdm import tqdm
 
 from PIL import Image
 
-# ==== project modules (프로젝트에 이미 존재한다고 가정) ====
+# ==== project modules (assumed to already exist in the project) ====
 from llm_machine import LLMTextEncoder, VisionTextSigLIP, log_print
 from llm_machine.data_linked import TextCollatorSingle
 
-# Token 이름 충돌 방지: Train/Search 분리
+# Avoid Token class name collision: separate Train/Search aliases
 from networks import SOLAR as TokenTrainNet
 from networks.RetrievalNet_another import SOLAR as TokenSearchNet
 
 
 # =========================
-# (0) 기본 유틸
+# (0) Basic utilities
 # =========================
 
 def unwrap_ddp(model: torch.nn.Module) -> torch.nn.Module:
@@ -62,7 +62,7 @@ def parse_img_size(img_size_arg: str):
       - "1024,512"  -> (1024, 512)
       - "1024 512"  -> (1024, 512)
       - "1024x512"  -> (1024, 512)
-      - "1024"      -> 1024 (정사각)
+      - "1024"      -> 1024 (square)
     """
     s = str(img_size_arg).strip().lower()
     if "," in s:
@@ -80,7 +80,7 @@ def parse_img_size(img_size_arg: str):
 
 
 # =========================
-# (1) Image Dataset (match 전용)
+# (1) Image Dataset (for matching only)
 # =========================
 
 def pil_loader(path):
@@ -107,7 +107,7 @@ class ImageFromList(torch.utils.data.Dataset):
         if self.bbox is not None:
             img = img.crop(self.bbox[idx])
         if self.imsize is not None:
-            # int면 정사각, tuple이면 그대로
+            # If int, use square resize; if tuple, use it as-is
             if isinstance(self.imsize, int):
                 size = (self.imsize, self.imsize)
             else:
@@ -119,7 +119,7 @@ class ImageFromList(torch.utils.data.Dataset):
 
 
 # =========================
-# (2) Cache util (npy)
+# (2) Cache utilities (npy)
 # =========================
 
 def _ensure_dir(p: str):
@@ -144,8 +144,8 @@ def _cache_paths(cache_dir: str, kind: str):
 
 def _safe_cache_root(save_root: str, img_size_tag: str) -> str:
     """
-    save_root가 read-only면 HOME 하위로 자동 fallback.
-    또한 img_size가 바뀌면 캐시 충돌을 막기 위해 하위 폴더로 분리한다.
+    If save_root is read-only, automatically fall back to a directory under HOME.
+    Also separate cache directories by img_size to avoid cache collisions.
     """
     save_root = os.path.abspath(save_root)
     try:
@@ -186,7 +186,7 @@ def cosine_distance_matrix(a: torch.Tensor, b: torch.Tensor, chunk: int = 128) -
 
 
 # =========================
-# (4) Text prototype embedding (라벨당 1개)
+# (4) Text prototype embedding (one per label)
 # =========================
 
 @torch.no_grad()
@@ -305,7 +305,7 @@ def extract_text_vectors_xattn_topN(
         attn = torch.softmax(float(attn_temp) * scores, dim=-1)     # (B, M)
         _, top_idx = torch.topk(attn, k=topN, dim=-1)               # (B, topN)
         top_embs = t_all[top_idx]                                   # (B, topN, D)
-        txt_mean = top_embs.mean(dim=1)                              # (B, D)
+        txt_mean = top_embs.mean(dim=1)                             # (B, D)
         txt_mean = F.normalize(txt_mean, p=2, dim=1).detach().cpu().float()
 
         bsz = txt_mean.size(0)
@@ -341,14 +341,15 @@ def fuse_and_match_from_cached(
 
 
 # =========================
-# (7) Model build (match 전용)
+# (7) Model build (for matching only)
 # =========================
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B-Instruct"
 
 def _try_build_token(cls, device: str):
     """
-    Token 구현체 ctor가 다를 수 있어, 가능한 조합을 순차 시도한다.
+    The constructor signature of the Token implementation may differ,
+    so try multiple argument combinations sequentially.
     """
     for kwargs in (
         {"outputdim": 1024, "classifier_num": 3821},
@@ -379,15 +380,14 @@ def build_model_for_match(
     if token_ckpt_search:
         load_token_from_path(token_model_search, token_ckpt_search, map_location="cpu", strict=strict_load)
     text_encoder = LLMTextEncoder(
-    model_name=MODEL_NAME,
-    device=device,
-    dtype=torch.bfloat16,
-    train_llm=True,     # ✅ 학습 당시처럼
-    use_lora=True,      # ✅ 학습 당시처럼
-    lora_r=8, lora_alpha=16, lora_dropout=0.1,  # ✅ 학습 당시처럼(같은 값)
-    pooling="mean",
-)
-
+        model_name=MODEL_NAME,
+        device=device,
+        dtype=torch.bfloat16,
+        train_llm=True,     # Keep the same as during training
+        use_lora=True,      # Keep the same as during training
+        lora_r=8, lora_alpha=16, lora_dropout=0.1,  # Keep the same as during training
+        pooling="mean",
+    )
 
     vt = VisionTextSigLIP(
         text_encoder=text_encoder,
@@ -406,7 +406,7 @@ def build_model_for_match(
 
 
 # =========================
-# (8) RUN: match 캐시 버전
+# (8) RUN: match cached version
 # =========================
 
 @torch.no_grad()
@@ -419,7 +419,7 @@ def run_match_fused_cached(
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
 
-    # 1) 모델 로드
+    # 1) Load models
     vt, token_model, token_model_search = build_model_for_match(
         device=device_str,
         vt_ckpt_path=args.vt_ckpt_path if len(args.vt_ckpt_path) > 0 else None,
@@ -431,7 +431,7 @@ def run_match_fused_cached(
     )
     vt_u = unwrap_ddp(vt)
 
-    # 2) text prototype
+    # 2) Text prototypes
     items_txt = load_jsonl(ITEMS_TXT_PATH)
     t_all, proto_labels, proto_texts = precompute_text_embeddings_one_per_label(
         vt=vt_u,
@@ -442,7 +442,7 @@ def run_match_fused_cached(
     )
     t_all = apply_text_self_attention_if_exists(vt_u, t_all).to(device, non_blocking=True)
 
-    # 3) query/ref paths
+    # 3) Query/reference paths
     query_paths = _load_image_paths_from_jsonl(args.query_jsonl)
     ref_paths   = _load_image_paths_from_jsonl(args.ref_jsonl)
 
@@ -450,14 +450,14 @@ def run_match_fused_cached(
     ref_names   = [_extract_name_by_regex(p) for p in ref_paths]
     ref_indices = {name: i for i, name in enumerate(ref_names)}
 
-    # 4) dataloader
+    # 4) DataLoader
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     tfm = transforms.Compose([transforms.ToTensor(), normalize])
 
     bs = int(args.infer_batch_size)
 
-    # ✅ 여기 핵심: "1024,512" -> (1024,512) 로 파싱
+    # Core step: parse "1024,512" into (1024, 512)
     img_size = parse_img_size(args.img_size)
     if isinstance(img_size, int):
         img_size_tag = f"{img_size}x{img_size}"
@@ -476,13 +476,13 @@ def run_match_fused_cached(
         pin_memory=(device_str == "cuda")
     )
 
-    # 5) cache dir (img_size별로 분리)
+    # 5) Cache directory separated by img_size
     cache_root = _safe_cache_root(args.save, img_size_tag)
     _ensure_dir(cache_root)
     q_cache = _cache_paths(cache_root, "query")
     r_cache = _cache_paths(cache_root, "ref")
 
-    # 6) IMG vecs cache
+    # 6) IMG vector cache
     if not os.path.exists(q_cache["img"]):
         q_img = extract_image_vectors_token_search(
             token_model_search=token_model_search,
@@ -507,7 +507,7 @@ def run_match_fused_cached(
     else:
         r_img = load_npy(r_cache["img"])
 
-    # 7) TXT vecs cache (xattn topN mean)
+    # 7) TXT vector cache (xattn topN mean)
     topN = int(args.topk_attn)
 
     if not os.path.exists(q_cache["txt"]):
@@ -540,7 +540,7 @@ def run_match_fused_cached(
     else:
         r_txt = load_npy(r_cache["txt"])
 
-    # 8) fuse + match
+    # 8) Fuse + match
     q_img_t = torch.from_numpy(q_img).float()
     q_txt_t = torch.from_numpy(q_txt).float()
     r_img_t = torch.from_numpy(r_img).float()
@@ -561,7 +561,7 @@ def run_match_fused_cached(
 
 
 # =========================
-# (9) args
+# (9) Arguments
 # =========================
 
 def build_argparser():
@@ -572,8 +572,8 @@ def build_argparser():
     ap.add_argument("--query_jsonl", type=str, required=True)
     ap.add_argument("--ref_jsonl", type=str, required=True)
 
-    ap.add_argument("--save", type=str, default="./outputs")  # ✅ 기본 writable
-    ap.add_argument("--img_size", type=str, default="1024,512")  # ✅ 핵심: (H,W) 형태
+    ap.add_argument("--save", type=str, default="./outputs")  # Default writable path
+    ap.add_argument("--img_size", type=str, default="1024,512")  # Core format: (H, W)
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--infer_batch_size", type=int, default=50)
 
@@ -589,7 +589,7 @@ def build_argparser():
     ap.add_argument("--token_ckpt_search", type=str, default="/home/policelab_l40s/R101-SOLAR_2_new.pth")
     ap.add_argument("--strict_load", type=int, default=0)
 
-    # log_print가 참조하는 필드들(프로젝트 코드에 맞춰 유지)
+    # Fields referenced by log_print, kept to match the project code
     ap.add_argument("--log_topk", type=int, default=5)
     ap.add_argument("--testcsv", type=str, default="/home/policelab_l40s/llm_prompt/llm_prompt/label_test_multimodal_1208.csv")
 
@@ -597,16 +597,17 @@ def build_argparser():
 
 
 # =========================
-# (10) main
+# (10) Main
 # =========================
 
 if __name__ == "__main__":
     args = build_argparser().parse_args()
 
-    # ⚠️ 아래 import 경로는 "네 프로젝트에서 load_vt_from_path / load_token_from_path가 정의된 파일"로 바꿔야 한다.
+    # Change the import path below to the file in your project
+    # where load_vt_from_path / load_token_from_path are defined.
     from train_images_multi_text_single_attention import load_vt_from_path, load_token_from_path
 
-    ITEMS_TXT_PATH = "/home/policelab_l40s/llm_prompt/llm_prompt/json_file/최종_txt_multimodal_train.jsonl"
+    ITEMS_TXT_PATH = ""
 
     run_match_fused_cached(
         args=args,
