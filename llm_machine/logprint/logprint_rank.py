@@ -12,7 +12,7 @@ import ast
 
 def get_logger(log_dir: str = "./logs", name: str = "log_print"):
     """
-    간단한 파일 로거 생성
+    Create a simple file logger
     """
     os.makedirs(log_dir, exist_ok=True)
 
@@ -42,20 +42,20 @@ def log_print(sorted_indices,
 
     logger = get_logger(log_dir="./logs", name="log_print")
 
-    # ====== 출력용 top-k 리스트 ======
-    TOP_LIST = 500  # top-20만 출력
+    # ====== top-k list for logging output ======
+    TOP_LIST = 500  # print only top-20 results
 
-    # ====== 평가 기준: Top-50 + Top-1%/5%/10% ======
+    # ====== evaluation criteria: Top-50 + Top-1%/5%/10% ======
     N_ref = len(ref_names)
     top50_k = 50
     top1p_k = max(1, int(math.ceil(N_ref * 0.01)))
     top5p_k = max(1, int(math.ceil(N_ref * 0.05)))
     top10p_k = max(1, int(math.ceil(N_ref * 0.10)))
 
-    # (혹시 reference가 50보다 적으면 안전하게 클램프)
+    # clamp safely if the number of references is smaller than 50
     top50_k = min(top50_k, N_ref)
 
-    # 카운터
+    # counters for accuracy calculation
     count_top50 = 0
     count_top1p = 0
     count_top5p = 0
@@ -69,7 +69,7 @@ def log_print(sorted_indices,
     logger.debug(f"sorted_distances.shape: {sorted_distances.shape}")
     logger.debug(f"N_ref={N_ref} | top50={top50_k}, top1%={top1p_k}, top5%={top5p_k}, top10%={top10p_k}")
 
-    # ✅ 안전한 index->name 변환 함수
+    # safe function to convert index to reference name
     def idx_to_name(idx: int) -> str:
         try:
             if 0 <= idx < len(ref_names):
@@ -82,7 +82,7 @@ def log_print(sorted_indices,
         enumerate(zip(sorted_indices, sorted_distances, query_order)),
         total=len(query_order)
     ):
-        # ✅ top-20 reference "이름" 추출
+        # extract top-20 reference names
         top20_ref_indices = top_ranks[:TOP_LIST].detach().cpu().tolist()
         top20_ref_names = [idx_to_name(int(rid)) for rid in top20_ref_indices]
 
@@ -90,7 +90,7 @@ def log_print(sorted_indices,
             [f"{i+1}:{name}" for i, name in enumerate(top20_ref_names)]
         ) + "]"
 
-        # GT 찾기
+        # find the ground truth label
         try:
             gt_file_name = df[df["cropped"] == query_file_name]["gt"].iloc[0]
         except IndexError:
@@ -106,7 +106,7 @@ def log_print(sorted_indices,
             })
             continue
 
-        # GT 라벨 파싱
+        # parse ground truth labels
         try:
             gt_labels = ast.literal_eval(gt_file_name)
             if isinstance(gt_labels, str):
@@ -114,7 +114,7 @@ def log_print(sorted_indices,
         except Exception:
             gt_labels = [gt_file_name]
 
-        # GT ref index로 변환
+        # convert GT labels to reference indices
         gt_indices = []
         for gt_label in gt_labels:
             if gt_label in ref_indices:
@@ -122,7 +122,7 @@ def log_print(sorted_indices,
             else:
                 logger.debug(f"[WARN] GT label '{gt_label}' not in ref_indices for query '{query_file_name}'")
 
-        # best_rank 계산 (1-based)
+        # compute best rank (1-based index)
         best_rank = float("inf")
         if len(gt_indices) > 0:
             for gt_index in gt_indices:
@@ -134,7 +134,7 @@ def log_print(sorted_indices,
 
         total += 1
 
-        # hit 계산
+        # compute hit metrics
         if best_rank == float("inf"):
             score = -1
             hit_top50 = 0
@@ -153,7 +153,7 @@ def log_print(sorted_indices,
             count_top5p += hit_top5p
             count_top10p += hit_top10p
 
-        # CSV 저장
+        # save row for CSV output
         rank_rows.append({
             "test_name": query_file_name,
             "best_rank": score,
@@ -164,7 +164,7 @@ def log_print(sorted_indices,
             "hit_top10p": hit_top10p,
         })
 
-        # 로그 출력
+        # write log for each query
         logger.debug(
             f"query: {query_file_name}, best_rank: {score} | "
             f"Top50({top50_k}):{hit_top50}, Top1%({top1p_k}):{hit_top1p}, "
@@ -172,7 +172,7 @@ def log_print(sorted_indices,
             f"top{TOP_LIST}: {top20_ref_str}"
         )
 
-    # 결과 로그
+    # log final evaluation results
     if total > 0:
         top50_acc = (count_top50 / total) * 100
         top1p_acc = (count_top1p / total) * 100
@@ -191,7 +191,7 @@ def log_print(sorted_indices,
     if total == 0:
         return [0.0, 0.0, 0.0, 0.0]
 
-    # 반환: Top-50, Top-1%, Top-5%, Top-10%
+    # return Top-50, Top-1%, Top-5%, Top-10% accuracy
     return [
         (count_top50 / total) * 100,
         (count_top1p / total) * 100,
