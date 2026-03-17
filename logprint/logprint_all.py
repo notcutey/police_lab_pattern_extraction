@@ -20,11 +20,11 @@ from loguru import logger
 
 
 # ============================
-#  mAP 계산 함수
+#  mAP calculation function
 # ============================
 def compute_average_precision(top_ranks, gt_indices, max_rank=None):
     """
-    AP(Average Precision) 계산 함수.
+    AP (Average Precision) calculation function.
     """
     if isinstance(top_ranks, torch.Tensor):
         top_ranks = top_ranks.detach().cpu().numpy()
@@ -55,12 +55,12 @@ def compute_average_precision(top_ranks, gt_indices, max_rank=None):
 
 
 # ============================
-#  nDCG 계산 함수
+#  nDCG calculation function
 # ============================
 def compute_ndcg(top_ranks, gt_indices, max_rank=None):
     """
-    nDCG (Normalized Discounted Cumulative Gain) 계산 함수.
-    binary relevance (정답이면 1, 아니면 0) 기준.
+    nDCG (Normalized Discounted Cumulative Gain) calculation function.
+    Based on binary relevance (1 if correct, otherwise 0).
     """
     if isinstance(top_ranks, torch.Tensor):
         top_ranks = top_ranks.detach().cpu().numpy()
@@ -79,14 +79,14 @@ def compute_ndcg(top_ranks, gt_indices, max_rank=None):
     if num_rel == 0:
         return 0.0
 
-    # DCG
+    # DCG calculation
     dcg = 0.0
     for i, is_rel in enumerate(relevant):
         if is_rel:
             rank = i + 1
             dcg += 1.0 / np.log2(rank + 1.0)
 
-    # IDCG (이상적인 경우: 정답이 맨 앞에 모여있음)
+    # IDCG (ideal case: all relevant items are ranked at the top)
     k = len(top_ranks)
     max_hits = min(num_rel, k)
     idcg = 0.0
@@ -102,7 +102,7 @@ def compute_ndcg(top_ranks, gt_indices, max_rank=None):
 
 
 # ============================
-#  메인 log_print 함수
+#  Main log_print function
 # ============================
 def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_names=None, args=None):
     start_time_stamp = strftime("%m-%d_%H%M", localtime())
@@ -118,7 +118,7 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
     df = pd.read_csv(args.testcsv)
     gt_len = sorted_distances.shape[1]
 
-    # 전체 reference 개수
+    # Total number of references
     total_refs = sorted_distances.shape[1]
 
     count_50, count_1pct, count_5pct, count_10pct, total = [0] * 5
@@ -134,7 +134,7 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
     print(f"TOP 5%: {TOP_5PCT}")
     print(f"TOP 10%: {TOP_10PCT}")
 
-    # mAP, nDCG 리스트 추가
+    # Lists for mAP and nDCG
     ap_list = []
     ndcg_list = []
 
@@ -152,7 +152,7 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
 
         top50_distances = top_distances[:TOP_50]
 
-        # Top-K accuracy 계산
+        # Top-K accuracy calculation
         best_rank = float('inf')
 
         for gt_index in gt_indices_list:
@@ -181,11 +181,11 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
 
         total += 1
 
-        # mAP 계산
+        # mAP calculation
         ap = compute_average_precision(top_ranks, gt_indices_list, max_rank=None)
         ap_list.append(ap)
 
-        # nDCG 계산
+        # nDCG calculation
         ndcg = compute_ndcg(top_ranks, gt_indices_list, max_rank=None)
         ndcg_list.append(ndcg)
 
@@ -197,7 +197,7 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
         logger.debug(f'count top 10% accuracy: {count_10pct} / total: {total}')
         logger.debug(f'AP: {ap:.4f}, nDCG: {ndcg:.4f}\n')
 
-    # 최종 mAP, nDCG 계산
+    # Final mAP and nDCG calculation
     if len(ap_list) > 0:
         mAP_percent = float(np.mean(ap_list)) * 100.0
     else:
