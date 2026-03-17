@@ -14,14 +14,14 @@ IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
 def gather_image_paths(image_glob: str) -> List[str]:
     raw: List[str] = []
     for token in image_glob.replace(",", " ").split():
-        if any(ch in token for ch in "*?[]"):      # 와일드카드
+        if any(ch in token for ch in "*?[]"):
             raw.extend(glob.glob(token))
-        elif os.path.isdir(token):                 # 폴더
+        elif os.path.isdir(token):
             for ext in IMG_EXTS:
                 raw.extend(glob.glob(os.path.join(token, f"*{ext}")))
-        else:                                      # 파일
+        else:
             raw.append(token)
-    # 파일 + 확장자 필터
+    # File + extension filter
     return [p for p in raw if os.path.isfile(p) and p.lower().endswith(IMG_EXTS)]
 
 def chunk_indices(n: int, bs: int) -> List[Tuple[int,int]]:
@@ -29,18 +29,18 @@ def chunk_indices(n: int, bs: int) -> List[Tuple[int,int]]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--items_txt", type=str, required=True, help="텍스트 후보 JSONL")
-    ap.add_argument("--image_glob", type=str, required=True, help="추론 이미지 글롭/경로(쉼표/공백 가능)")
+    ap.add_argument("--items_txt", type=str, required=True, help="Text candidate JSONL")
+    ap.add_argument("--image_glob", type=str, required=True, help="Inference image glob/path (comma/space separated allowed)")
     ap.add_argument("--topk", type=int, default=10)
     ap.add_argument("--text_batch", type=int, default=32)
-    ap.add_argument("--image_batch", type=int, default=16)   # ✅ 추가: 이미지 배치 크기
+    ap.add_argument("--image_batch", type=int, default=16)
     ap.add_argument("--fused_outdir", type=str, default="")
 
     ap.add_argument("--vt_ckpt_path", type=str, default="")
     ap.add_argument("--token_ckpt_path", type=str, default="")
     ap.add_argument("--strict_load", type=int, default=0)
 
-    # (옵션) pair 로딩용 태그/디렉토리 지원
+    # Optional support for pair loading using tag and directory
     ap.add_argument("--ckpt_dir", type=str, default="")
     ap.add_argument("--ckpt_tag", type=str, default="latest")
 
@@ -54,12 +54,13 @@ def main():
         strict_load=bool(args.strict_load),
     )
 
-    # 가중치 로드: 개별 경로 없으면 train_state/pair에서 불러오기
+    # Load weights: if individual paths are not given, load from train_state or pair
     if (not args.vt_ckpt_path) and (not args.token_ckpt_path) and args.ckpt_dir:
         state_path = os.path.join(args.ckpt_dir, f"train_state_{args.ckpt_tag}.pt")
         if os.path.isfile(state_path):
             raw = torch.load(state_path, map_location="cpu")
-            if "vt" in raw: vt.load_state_dict(raw["vt"], strict=False)
+            if "vt" in raw:
+                vt.load_state_dict(raw["vt"], strict=False)
             if "token" in raw:
                 (token_model.module if hasattr(token_model, "module") else token_model).load_state_dict(raw["token"], strict=False)
             print(f"[Load] from train_state: {state_path}")
@@ -76,28 +77,28 @@ def main():
 
     vt.eval()
 
-    # 텍스트 후보 읽기
+    # Read text candidates
     items_txt = load_jsonl(args.items_txt)
     texts = [it["text"] for it in items_txt]
     labels_of_texts = [int(it["label"]) for it in items_txt]
     M = len(texts)
     print(f"[Infer] #texts (candidates): {M}")
 
-    # 이미지 경로 수집
+    # Collect image paths
     image_paths = gather_image_paths(args.image_glob)
     if not image_paths:
-        raise SystemExit("image_glob에 해당하는 이미지가 없다.")
+        raise SystemExit("No images matched image_glob.")
     N = len(image_paths)
     print(f"[Infer] #images: {N}")
 
-    # 변환
+    # Transform
     tfm = build_eval_transform(
         image_size=DEFAULT_IMAGE_SIZE,
         norm_mean=tuple(DEFAULT_NORM_MEAN),
         norm_std=tuple(DEFAULT_NORM_STD)
     )
 
-    # 1) 텍스트 임베딩만 선계산(메모리에 저장) → [M, D]
+    # 1) Precompute only text embeddings and store them in memory -> [M, D]
     proj_dim = getattr(vt, 'proj_out_dim', 1024)
     text_embs_all = np.zeros((M, proj_dim), dtype=np.float32)
 
@@ -118,27 +119,27 @@ def main():
         attention_mask = batch.attention_mask.to(device, non_blocking=True)
         with torch.no_grad():
             with autocast_ctx:
-                t_emb = vt.encode_texts(input_ids, attention_mask)  # [cur, D]
+                t_emb = vt.encode_texts(input_ids, attention_mask)
         text_embs_all[start:end] = t_emb.detach().cpu().to(torch.float32).numpy()
         start = end
-    # 텍스트 쪽은 끝.
+    # Text side is done.
 
-    # 2) 이미지 배치 × 텍스트 배치로 점수 계산 후 즉시 Top-K 융합
+    # 2) Compute scores with image batch × text batch, then immediately fuse Top-K
     fused_vecs: List[np.ndarray] = []
     meta_all: Dict[str, Any] = {}
 
     for is_, ie in chunk_indices(N, args.image_batch):
-        # 이미지 배치 적재
-        imgs_tensor, valid_paths = load_images_as_tensor(image_paths[is_:ie], tfm)  # [B, C, H, W]
+        # Load image batch
+        imgs_tensor, valid_paths = load_images_as_tensor(image_paths[is_:ie], tfm)
         if imgs_tensor is None or len(valid_paths) == 0:
             continue
         imgs_tensor = imgs_tensor.to(device, non_blocking=True)
         B = imgs_tensor.size(0)
 
-        # 현재 이미지 배치에 대한 점수 버퍼 [B, M] (GPU 메모리 절약을 위해 float16/32 선택)
+        # Score buffer [B, M] for the current image batch
         scores_bm = torch.empty((B, M), dtype=torch.float32, device=device)
 
-        # 텍스트 배치로 타일링
+        # Tile by text batch
         t0 = 0
         while t0 < M:
             t1 = min(t0 + args.text_batch, M)
@@ -149,14 +150,14 @@ def main():
 
             with torch.no_grad():
                 with autocast_ctx:
-                    scores = forward_scores(vt, imgs_tensor, input_ids, attention_mask)  # [B, cur]
+                    scores = forward_scores(vt, imgs_tensor, input_ids, attention_mask)
             scores_bm[:, t0:t1] = scores
             t0 = t1
 
-        # 이미지 배치의 각 이미지에 대해 즉시 Top-K 융합 및 메타 생성
+        # Immediately perform Top-K fusion and metadata generation for each image in the batch
         for bi, img_path in enumerate(valid_paths):
-            scores_i = scores_bm[bi]  # [M] on device
-            # CPU로 이동하여 numpy로 가볍게 처리
+            scores_i = scores_bm[bi]
+            # Move to CPU and process lightly with numpy
             scores_i_np = scores_i.detach().cpu().to(torch.float32).numpy()
 
             chosen_idx, weights = topk_unique_by_label(
@@ -170,9 +171,9 @@ def main():
                 continue
 
             W = np.asarray(weights, dtype=np.float32)
-            V = text_embs_all[chosen_idx, :]                     # [K, D]
+            V = text_embs_all[chosen_idx, :]
             W = W / (W.sum() + 1e-12)
-            fused_vec = (W[:, None] * V).sum(axis=0).astype(np.float32)  # [D]
+            fused_vec = (W[:, None] * V).sum(axis=0).astype(np.float32)
             fused_vecs.append(fused_vec)
 
             meta_all[os.path.basename(img_path)] = [
@@ -186,17 +187,17 @@ def main():
                 for r, ti in enumerate(chosen_idx)
             ]
 
-        # 배치 끝날 때 메모리 정리
+        # Clear memory at the end of the batch
         del imgs_tensor, scores_bm
         torch.cuda.empty_cache() if device == "cuda" else None
 
     if not fused_vecs:
-        raise RuntimeError("fused_vecs가 비어 있음")
+        raise RuntimeError("fused_vecs is empty")
 
     fused_vecs = np.stack(fused_vecs, axis=0)
 
-    # 저장
-    # outdir 기본값: 첫 유효 이미지와 같은 폴더 내 fused_vecs/
+    # Save
+    # Default outdir: fused_vecs/ inside the folder of the first valid image
     first_valid = next((p for p in image_paths if os.path.isfile(p)), None)
     base_dir = os.path.dirname(first_valid) if first_valid else os.getcwd()
     outdir = args.fused_outdir or os.path.join(base_dir, "fused_vecs")
