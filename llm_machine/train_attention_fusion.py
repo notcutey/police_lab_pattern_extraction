@@ -41,7 +41,7 @@ from llm_machine import log_print
 
 
 # ===================== #
-#   기본 설정 / 경로     #
+#   Basic settings and paths
 # ===================== #
 
 MODEL_NAME = "meta-llama/Llama-3.2-3B-Instruct"
@@ -59,7 +59,7 @@ CKPT_DIR = "/home/policelab_l40s/llm_prompt/llm_prompt/llm_machine/checkpoint_si
 os.makedirs(CKPT_DIR, exist_ok=True)
 
 EPOCHS = 600
-BATCH_SIZE_IMG = 64         # ✅ DDP에서는 "per-GPU batch"로 해석한다.
+BATCH_SIZE_IMG = 64
 NUM_WORKERS_IMG = 4
 
 LR = 1e-5
@@ -74,7 +74,7 @@ DEBUG_EVERY_STEPS = 1
 
 
 # ===================== #
-#   DDP 최소 조건 유틸   #
+#   Minimum DDP utility conditions
 # ===================== #
 
 def ddp_is_on() -> bool:
@@ -82,9 +82,9 @@ def ddp_is_on() -> bool:
 
 def ddp_setup() -> Tuple[int, int, int]:
     """
-    torchrun으로 실행될 때:
-      - RANK, WORLD_SIZE, LOCAL_RANK 환경변수가 자동으로 세팅된다.
-      - 이를 기반으로 NCCL 프로세스 그룹을 초기화한다.
+    When launched with torchrun:
+      - RANK, WORLD_SIZE, and LOCAL_RANK environment variables are set automatically.
+      - Initialize the NCCL process group based on them.
     """
     if not ddp_is_on():
         return 0, 1, 0
@@ -118,7 +118,7 @@ def unwrap_ddp(model: torch.nn.Module) -> torch.nn.Module:
 
 
 # ===================== #
-#     유틸 함수 묶음     #
+#     Utility function group
 # ===================== #
 
 def _now():
@@ -168,7 +168,7 @@ def load_jsonl(path: str):
 
 
 # ===================== #
-#   체크포인트 유틸      #
+#   Checkpoint utilities
 # ===================== #
 
 def _safe_torch_load(ckpt_path: str, map_location="cpu"):
@@ -212,7 +212,8 @@ def _select_by_prefix_and_shape(
 
 def save_weights(vt, token_model, optimizer, scaler, epoch, global_step, tag="last", save_full_state=True):
     """
-    ✅ DDP에서도 단일 GPU에서도 그대로 로드 가능하도록 vt는 unwrap하여 저장한다.
+    Save vt after unwrapping so that it can be loaded consistently
+    in both DDP and single-GPU environments.
     """
     vt_unwrapped = unwrap_ddp(vt)
     tok_unwrapped = unwrap_ddp(token_model)
@@ -269,28 +270,28 @@ def load_token_from_path(
     token_model: torch.nn.Module,
     path: str,
     map_location="cpu",
-    strict: bool = False,   # ✅ 호출 호환용(무시해도 됨)
+    strict: bool = False,
 ):
     assert os.path.isfile(path), f"token ckpt not found: {path}"
 
     ckpt = torch.load(path, map_location=map_location, weights_only=False)
 
-    # ✅ B 코드와 동일: ['state_dict']에서 꺼내기
+    # Extract from ['state_dict'] exactly as in code B
     if "state_dict" in ckpt and isinstance(ckpt["state_dict"], dict):
         state_dict = ckpt["state_dict"]
     else:
-        # 혹시 .pth가 state_dict 자체로 저장된 케이스까지 커버
+        # Also handle the case where the .pth file stores the state_dict directly
         state_dict = ckpt if isinstance(ckpt, dict) else {}
         if len(state_dict) == 0:
             raise KeyError(f"'state_dict' not found and ckpt is not a dict: {path}")
 
-    # module. prefix 제거
+    # Remove module. prefix
     if len(state_dict) > 0 and all(k.startswith("module.") for k in state_dict.keys()):
         state_dict = {k[len("module."):]: v for k, v in state_dict.items()}
 
     model_wo_ddp = unwrap_ddp(token_model)
 
-    # ✅ B 코드와 동일하게 strict=False 로드 (strict 인자는 무시)
+    # Load with strict=False exactly as in code B
     incompatible = model_wo_ddp.load_state_dict(state_dict, strict=False)
 
     miss = list(getattr(incompatible, "missing_keys", []))
@@ -300,7 +301,6 @@ def load_token_from_path(
         print(f"  missing keys: {len(miss)} (first 10): {miss[:10]}")
     if unexp:
         print(f"  unexpected keys: {len(unexp)} (first 10): {unexp[:10]}")
-
 
 def load_train_state_or_pair(vt, token_model, tag: str = "last") -> Optional[int]:
     state_path = os.path.join(CKPT_DIR, f"train_state_{tag}.pt")
@@ -403,7 +403,7 @@ def _load_resume_checkpoint(
 
 
 # ===================== #
-#   라벨별 텍스트 준비    #
+#   Text preparation per label
 # ===================== #
 
 def build_label2texts(items_txt: List[Dict[str, Any]]) -> Dict[int, List[str]]:
@@ -434,7 +434,7 @@ def _unique_labels_in_batch(batch_img) -> List[int]:
             uniq.update(map(int, labs))
         return sorted(uniq)
 
-    raise TypeError("batch_img에서 라벨 정보를 찾을 수 없다. (label_sets 또는 labels 필요)")
+    raise TypeError("Cannot find label information in batch_img. label_sets or labels is required.")
 
 def _build_text_batch_one_per_label(
     batch_img,
@@ -464,7 +464,7 @@ def _build_text_batch_one_per_label(
 
 
 # ===================== #
-#    역전파 계측 유틸     #
+#    Backpropagation measurement utilities
 # ===================== #
 
 class GradProbe:
@@ -543,7 +543,7 @@ class ParamSnapshot:
 
 
 # ===================== #
-#  멀티라벨 메트릭(R@K)  #
+#  Multi-label metric R@K
 # ===================== #
 
 def _extract_image_label_sets(batch_img) -> List[set]:
@@ -559,10 +559,10 @@ def _extract_image_label_sets(batch_img) -> List[set]:
                     idxs = labels[i].nonzero(as_tuple=False).squeeze(1).tolist()
                     out.append(set(map(int, idxs)))
                 return out
-            raise TypeError("labels 텐서는 [B, C] multi-hot 형태여야 한다.")
+            raise TypeError("labels tensor must be in [B, C] multi-hot format.")
         return [set(map(int, labs)) for labs in labels]
 
-    raise TypeError("batch_img에서 라벨 정보를 찾을 수 없다. (label_sets 또는 labels 필요)")
+    raise TypeError("Cannot find label information in batch_img. label_sets or labels is required.")
 
 @torch.no_grad()
 def _topk_unique_by_label(scores_1d, labels_of_texts: List[int], k: int, min_score: Optional[float] = None):
@@ -623,19 +623,19 @@ def _compute_label_hit_ratio_at_k(
                     scores = out[k_name]
                     break
             if scores is None:
-                raise RuntimeError(f"VisionTextSigLIP forward 결과에서 score 행렬 키({candidate_keys})를 찾지 못했다.")
+                raise RuntimeError(f"Could not find score matrix key {candidate_keys} in VisionTextSigLIP forward output.")
         else:
             scores = out
 
     if scores.dim() != 2:
-        raise ValueError(f"scores 텐서는 [B, M] 2D 여야 하는데, shape={scores.shape} 입니다.")
+        raise ValueError(f"scores tensor must be 2D with shape [B, M], but got shape={scores.shape}.")
 
     B, M = scores.shape
     if B == 0 or M == 0:
         return float('nan'), 0, 0
 
     if len(text_label_ids) != M:
-        raise ValueError(f"text_label_ids 길이({len(text_label_ids)})와 scores의 두번째 차원 M({M})이 일치해야 한다.")
+        raise ValueError(f"Length of text_label_ids ({len(text_label_ids)}) must match the second dimension M ({M}) of scores.")
 
     scores_np = scores.detach().cpu().numpy()
 
@@ -658,7 +658,7 @@ def _compute_label_hit_ratio_at_k(
 
 
 # ===================== #
-#   이미지 Dataset 유틸  #
+#   Image dataset utilities
 # ===================== #
 
 class ImageFromList(torch.utils.data.Dataset):
@@ -700,7 +700,7 @@ class ImageFromList(torch.utils.data.Dataset):
 
 
 # ===================== #
-#   코사인 거리/유사도    #
+#   Cosine distance and similarity
 # ===================== #
 
 @torch.no_grad()
@@ -732,7 +732,7 @@ def cosine_similarity_matrix(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 
 
 # ===================== #
-# fused vector 추출 (match에서 사용) #
+# Fused vector extraction used in match
 # ===================== #
 
 @torch.no_grad()
@@ -741,7 +741,7 @@ def extract_fused_vectors(
     token_model: Token,
     token_model_search: Token_1,
     loader: DataLoader,
-    t_all: torch.Tensor,     # (M, D)
+    t_all: torch.Tensor,
     weight_img: float,
     weight_txt: float,
     attn_temp: float,
@@ -749,13 +749,13 @@ def extract_fused_vectors(
     topk_attn: int = 0,
 ) -> torch.Tensor:
     """
-    - attn이 가장 높은 TOP_N prototype 임베딩을 평균(mean)
-    - fused = norm(weight_img*image_feats + weight_txt*text_mean)
+    Average the top-N prototype embeddings with the highest attention
+    and compute fused = norm(weight_img*image_feats + weight_txt*text_mean).
     """
     vt_u = unwrap_ddp(vt)
     vt_u.eval()
     token_model.eval()
-    token_model_search.eval()  # ✅ 추가: search 모델 eval
+    token_model_search.eval()
 
     use_amp = (device.type == "cuda")
     try:
@@ -784,12 +784,9 @@ def extract_fused_vectors(
         attn = torch.softmax(attn_temp * scores, dim=-1)
         top_vals, top_idx = torch.topk(attn, k=TOP_N, dim=-1)
 
-        top_embs = t_all[top_idx]               # (B,TOP_N,D)
-        text_mean = top_embs.mean(dim=1)        # (B,D)
+        top_embs = t_all[top_idx]
+        text_mean = top_embs.mean(dim=1)
         text_mean = F.normalize(text_mean, p=2, dim=1)
-
-
-        # image_feats_norm = F.normalize(image_feat_final, p=2, dim=1)
 
         fused = (weight_img * image_feat_final) + (weight_txt * text_mean)
         fused = F.normalize(fused, p=2, dim=1)
@@ -801,7 +798,7 @@ def extract_fused_vectors(
 
 
 # ===================== #
-# 모델 빌드 함수
+# Model build function
 # ===================== #
 
 def build_model(
@@ -809,7 +806,6 @@ def build_model(
     vt_ckpt_path: Optional[str] = None,
     token_ckpt_path: Optional[str] = None,
     token_ckpt_search: Optional[str] = None,
-
     strict_load: bool = False
 ):
     token_model = Token(outputdim=1024, classifier_num=3821).to(device)
@@ -832,7 +828,6 @@ def build_model(
             load_token_from_path(token_model_search, token_ckpt_search, map_location="cpu", strict=strict_load)
         except Exception as e:
             print(f"[TokenSearch] Failed to load from '{token_ckpt_search}': {e}")
-
 
     text_encoder = LLMTextEncoder(
         model_name=MODEL_NAME,
@@ -860,7 +855,7 @@ def build_model(
 
 
 # ===================== #
-# 학습 루프 (DDP 최소 조건 포함)
+# Training loop including minimum DDP conditions
 # ===================== #
 
 def main_train(
@@ -879,7 +874,7 @@ def main_train(
     strict_load: bool = False,
     save_full_state: bool = True,
 ):
-    # ✅ DDP 초기화 (최소조건 1,2)
+    # Initialize DDP
     rank, world_size, local_rank = ddp_setup()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -888,7 +883,7 @@ def main_train(
 
     device_for_model = f"cuda:{local_rank}" if (device == "cuda") else "cpu"
 
-    vt, token_model,token_model_search = build_model(
+    vt, token_model, token_model_search = build_model(
         device=device_for_model,
         vt_ckpt_path=vt_ckpt_path,
         token_ckpt_path=token_ckpt_path,
@@ -896,11 +891,11 @@ def main_train(
         strict_load=strict_load
     )
 
-    # ✅ vt를 DDP로 감싼다 (최소조건 4)
+    # Wrap vt with DDP
     if ddp_is_on():
         vt = DDP(vt, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
-    vt_u = unwrap_ddp(vt)  # 토크나이저 접근/로드/유틸에 사용
+    vt_u = unwrap_ddp(vt)
 
     assert os.path.isfile(ITEMS_IMG_PATH), f"not found: {ITEMS_IMG_PATH}"
     assert os.path.isfile(ITEMS_TXT_PATH), f"not found: {ITEMS_TXT_PATH}"
@@ -930,7 +925,7 @@ def main_train(
 
     img_ds = ImageDatasetMultiLabel(items_img, image_transform=tfm)
 
-    # ✅ DistributedSampler 적용 + DataLoader shuffle 끄기 (최소조건 3)
+    # Apply DistributedSampler and disable DataLoader shuffle
     if ddp_is_on():
         img_sampler = DistributedSampler(
             img_ds,
@@ -946,7 +941,7 @@ def main_train(
 
     img_loader = DataLoader(
         img_ds,
-        batch_size=BATCH_SIZE_IMG,            # per-GPU batch
+        batch_size=BATCH_SIZE_IMG,
         shuffle=shuffle_flag,
         sampler=img_sampler,
         num_workers=NUM_WORKERS_IMG,
@@ -968,13 +963,11 @@ def main_train(
     trainable = [p for p in vt_u.parameters() if p.requires_grad] + \
             [p for p in token_model.parameters() if p.requires_grad]
 
-
-
     optimizer = torch.optim.AdamW(trainable, lr=LR, weight_decay=WEIGHT_DECAY)
     scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda"))
 
     start_epoch, global_step = _load_resume_checkpoint(
-        vt=vt,  # DDP wrapper 전달해도 내부에서 unwrap 처리한다.
+        vt=vt,
         token_model=token_model,
         optimizer=optimizer,
         scaler=scaler,
@@ -995,7 +988,7 @@ def main_train(
     snap = ParamSnapshot(token_model, max_params=DEBUG_SAMPLE_PARAMS)
 
     for epoch in range(start_epoch, EPOCHS + 1):
-        # ✅ epoch마다 shard shuffle 동기화 (최소조건 3)
+        # Synchronize shard shuffle every epoch
         if ddp_is_on() and hasattr(img_loader.sampler, "set_epoch"):
             img_loader.sampler.set_epoch(epoch)
 
@@ -1022,7 +1015,7 @@ def main_train(
                 grad_probe.reset()
                 snap.take_before()
 
-            # ✅ train_step_linked는 vt가 DDP여도 forward/backward 동작한다.
+            # train_step_linked works even if vt is wrapped by DDP
             logs = train_step_linked(vt, token_model, batch_img, batch_txt, optimizer, scaler)
 
             cur_loss = float(logs.get("loss", float("nan")))
@@ -1043,7 +1036,7 @@ def main_train(
                 elif isinstance(batch_img, dict) and "images" in batch_img:
                     images_t = batch_img["images"]
                 else:
-                    raise TypeError("batch_img에서 images 텐서를 찾을 수 없다.")
+                    raise TypeError("Cannot find images tensor in batch_img.")
 
                 device_t = next(vt_u.parameters()).device
                 images_t = images_t.to(device_t, non_blocking=True)
@@ -1075,7 +1068,7 @@ def main_train(
             max_mem_mb = (torch.cuda.max_memory_allocated() / (1024 ** 2)) if device == "cuda" else 0.0
             lr_cur = optimizer.param_groups[0]["lr"]
 
-            # ✅ 로그는 rank0만
+            # Print logs only on rank 0
             if is_main_process(rank) and ((step % LOG_EVERY_STEPS) == 0):
                 cum_ratio = (cum_hits / cum_gt * 100.0) if cum_gt > 0 else float("nan")
                 print(
@@ -1093,12 +1086,12 @@ def main_train(
         if is_main_process(rank):
             print(f">> Epoch [{epoch}] done in {format_eta(epoch_time)}")
 
-        # ✅ 저장은 rank0만
+        # Save only on rank 0
         if is_main_process(rank) and (epoch % save_interval == 0):
             save_weights(vt, token_model, optimizer, scaler, epoch, global_step,
                          tag=f"epoch{epoch:03d}", save_full_state=save_full_state)
 
-        # ✅ epoch 끝 barrier(선택이지만 안전)
+        # Barrier at the end of each epoch
         if ddp_is_on():
             dist.barrier()
 
@@ -1112,8 +1105,8 @@ def main_train(
 
 
 # ===================== #
-# 아래: infer/match/cluster는 원코드 흐름 유지
-# (DDP 학습 최소조건과 충돌 없게 unwrap만 보강)
+# Below: infer, match, and cluster keep the original flow
+# Only unwrap reinforcement is added to avoid conflicts with DDP training
 # ===================== #
 
 @torch.no_grad()
@@ -1217,7 +1210,8 @@ def _load_image_paths_from_jsonl(path: str) -> List[str]:
 
 
 # ---------------------
-# Infer/Match/Cluster (원래 로직 유지, 필요 시 추가로 수정 가능)
+# Infer, Match, and Cluster
+# The original logic is preserved and can be modified further if needed
 # ---------------------
 
 @torch.no_grad()
@@ -1237,7 +1231,7 @@ def run_infer(
 ):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    vt, token_model,token_model_search = build_model(
+    vt, token_model, token_model_search = build_model(
         device=device,
         vt_ckpt_path=vt_ckpt_path,
         token_ckpt_path=token_ckpt_path,
@@ -1355,12 +1349,11 @@ def run_infer(
 def run_match_fused(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    vt, token_model,token_model_search = build_model(
+    vt, token_model, token_model_search = build_model(
         device=device,
         vt_ckpt_path=args.vt_ckpt_path if len(args.vt_ckpt_path) > 0 else None,
         token_ckpt_path=args.token_ckpt_path if len(args.token_ckpt_path) > 0 else None,
         token_ckpt_search=args.token_ckpt_search if len(args.token_ckpt_search) > 0 else None,
-
         strict_load=bool(args.strict_load),
     )
     if (len(args.vt_ckpt_path) == 0) and (len(args.token_ckpt_path) == 0):
@@ -1407,14 +1400,14 @@ def run_match_fused(args):
 
     query_vecs = extract_fused_vectors(vt_u, token_model, token_model_search, query_loader, t_all, weight_img, weight_txt,
                                        args.attn_temp, torch.device(device), topk_attn=0)
-    ref_vecs = extract_fused_vectors(vt_u, token_model,token_model_search, ref_loader, t_all, weight_img, weight_txt,
+    ref_vecs = extract_fused_vectors(vt_u, token_model, token_model_search, ref_loader, t_all, weight_img, weight_txt,
                                      args.attn_temp, torch.device(device), topk_attn=0)
 
     distances = cosine_distance_matrix(query_vecs, ref_vecs)
     sorted_distances, sorted_indices = torch.sort(distances, dim=1)
 
     log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_names, args)
-    print("[Match] log_print 완료")
+    print("[Match] log_print completed")
 
 @torch.no_grad()
 def run_cluster(args):
@@ -1459,7 +1452,7 @@ def run_cluster(args):
 
 
 # ===================== #
-#    엔트리 포인트       #
+#    Entry point
 # ===================== #
 
 def build_argparser():
