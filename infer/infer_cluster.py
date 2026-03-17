@@ -21,9 +21,9 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as T
 from PIL import Image
 from torchvision.transforms import InterpolationMode
-from sklearn.cluster import KMeans   # ★ 추가: KMeans
+from sklearn.cluster import KMeans
 
-# ---- 프로젝트 모듈 ----
+# Project modules
 from llm_machine import LLMTextEncoder
 from llm_machine import VisionTextSigLIP
 from llm_machine.data_linked import ImageDatasetMultiLabel, ImageCollatorMulti, TextCollatorSingle
@@ -32,7 +32,7 @@ from llm_machine import train_step_linked
 from llm_machine import log_print
 
 # ===================== #
-#      전역 설정        #
+#      Global settings
 # ===================== #
 MODEL_NAME = "meta-llama/Llama-3.2-3B-Instruct"
 image_size = (1024, 512)
@@ -62,7 +62,7 @@ DEBUG_SAMPLE_PARAMS = 3
 DEBUG_EVERY_STEPS = 1
 
 # ===================== #
-#  유틸/로깅/세이브 로드  #
+#  Utility, logging, save, load
 # ===================== #
 import psutil
 from contextlib import contextmanager
@@ -89,12 +89,12 @@ def log(msg: str):
 @contextmanager
 def timeit(tag: str):
     t0 = time.perf_counter()
-    log(f"▶ {tag} ...")
+    log(f"Start {tag} ...")
     try:
         yield
     finally:
         dt = time.perf_counter() - t0
-        log(f"✔ {tag} done in {_fmt_eta(dt)}  ({_mem_gb()})")
+        log(f"Done {tag} in {_fmt_eta(dt)}  ({_mem_gb()})")
 
 def _safe_torch_load(ckpt_path: str, map_location="cpu"):
     try:
@@ -201,9 +201,12 @@ def load_token_from_path(token_model: torch.nn.Module, path: str, map_location="
     model_dict = model_wo_ddp.state_dict()
     filtered = _select_by_prefix_and_shape(sd, model_dict, allowed_prefixes=("backbone", "tr"))
     if len(filtered) == 0:
-        filtered = {k: v for k, v in sd.items()
-                    if (k in model_dict) and (model_dict[k].shape == v.shape)
-                    and not any(x in k for x in ["classifier", "fc", "head", "heads", "arcface"])}
+        filtered = {
+            k: v for k, v in sd.items()
+            if (k in model_dict)
+            and (model_dict[k].shape == v.shape)
+            and not any(x in k for x in ["classifier", "fc", "head", "heads", "arcface"])
+        }
     incompatible = model_wo_ddp.load_state_dict(filtered, strict=False if not strict else True)
     miss = list(getattr(incompatible, "missing_keys", []))
     unexp = list(getattr(incompatible, "unexpected_keys", []))
@@ -316,11 +319,12 @@ def _gather_paths(arg: Optional[str]) -> List[str]:
     for p in parts:
         p = os.path.abspath(p)
         if (p not in seen) and os.path.isfile(p):
-            out.append(p); seen.add(p)
+            out.append(p)
+            seen.add(p)
     return out
 
 # ---------------------
-# 라벨별 텍스트 준비
+# Prepare texts by label
 # ---------------------
 def build_label2texts(items_txt: List[Dict[str, Any]]) -> Dict[int, List[str]]:
     table: Dict[int, List[str]] = defaultdict(list)
@@ -350,7 +354,7 @@ def _unique_labels_in_batch(batch_img) -> List[int]:
                 for labs in labels:
                     uniq.update(map(int, labs))
                 return sorted(uniq)
-    raise TypeError("batch_img에서 라벨 정보를 찾을 수 없다.")
+    raise TypeError("Cannot find label information in batch_img.")
 
 def _build_text_batch_one_per_label(
     batch_img,
@@ -378,7 +382,7 @@ def _build_text_batch_one_per_label(
     return batch_txt
 
 # ===================== #
-#    역전파 계측 유틸     #
+#    Backpropagation measurement utilities
 # ===================== #
 class GradProbe:
     def __init__(self, model: torch.nn.Module, name_prefix: str = "token"):
@@ -454,7 +458,7 @@ class ParamSnapshot:
             flags.append(bool(not torch.equal(b, a)))
         return flags
 
-# ---------- 멀티라벨 메트릭 ----------
+# ---------- Multi-label metrics ----------
 def _extract_image_label_sets(batch_img) -> List[set]:
     if hasattr(batch_img, "label_sets"):
         return [set(map(int, labs)) for labs in batch_img.label_sets]
@@ -469,20 +473,20 @@ def _extract_image_label_sets(batch_img) -> List[set]:
                     out.append(set(map(int, idxs)))
                 return out
             else:
-                raise TypeError("labels 텐서는 [B, C] multi-hot 형태여야 한다.")
+                raise TypeError("labels tensor must be [B, C] multi-hot format.")
         else:
             return [set(map(int, labs)) for labs in labels]
 
-    raise TypeError("batch_img에서 라벨 정보를 찾을 수 없다.")
+    raise TypeError("Cannot find label information in batch_img.")
 
 @torch.no_grad()
 def _compute_label_hit_ratio_at_k(
     vt,
-    images_t: torch.Tensor,           # [B, 3, H, W]
-    input_ids: torch.Tensor,          # [M, L]
-    attention_mask: torch.Tensor,     # [M, L]
-    image_label_sets: List[set],      # 길이 B
-    text_label_ids: List[int],        # 길이 M
+    images_t: torch.Tensor,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    image_label_sets: List[set],
+    text_label_ids: List[int],
     k: int = 5,
 ) -> Tuple[float, int, int]:
     device = next(vt.parameters()).device
@@ -503,14 +507,14 @@ def _compute_label_hit_ratio_at_k(
     else:
         scores = out if torch.is_tensor(out) else None
     if scores is None:
-        raise RuntimeError("VisionTextSigLIP forward 결과에서 점수 행렬 키를 찾지 못했다.")
+        raise RuntimeError("Could not find a score matrix key in VisionTextSigLIP forward output.")
 
     B, M = scores.shape
     kk = min(k, M)
-    _, topk_idx = torch.topk(scores, k=kk, dim=1)  # [B, kk]
+    _, topk_idx = torch.topk(scores, k=kk, dim=1)
 
     text_label_ids_t = torch.tensor(text_label_ids, device=scores.device)
-    topk_label_ids = text_label_ids_t[topk_idx]  # [B, kk]
+    topk_label_ids = text_label_ids_t[topk_idx]
 
     total_hits = 0
     total_gt = 0
@@ -528,7 +532,7 @@ def _compute_label_hit_ratio_at_k(
     return ratio, total_hits, total_gt
 
 # ---------------------
-#  텍스트/스코어 유틸
+#  Text and score utilities
 # ---------------------
 def _forward_scores(vt, images: torch.Tensor, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
     vt.eval()
@@ -541,7 +545,7 @@ def _forward_scores(vt, images: torch.Tensor, input_ids: torch.Tensor, attention
     else:
         scores = out if torch.is_tensor(out) else None
     if scores is None:
-        raise RuntimeError("VisionTextSigLIP forward 결과에서 점수 행렬 키를 찾지 못했다.")
+        raise RuntimeError("Could not find a score matrix key in VisionTextSigLIP forward output.")
     return scores
 
 def _topk_unique_by_label(
@@ -575,10 +579,10 @@ def _topk_unique_by_label(
     return chosen_idx, chosen_scores
 
 # ===================== #
-#   (NEW) 클러스터 유틸  #
+#   Cluster utilities
 # ===================== #
 def _cosine_sim_matrix_np(E: np.ndarray) -> np.ndarray:
-    """E: [N, D] → 코사인 유사도 [N, N]"""
+    """E: [N, D] -> cosine similarity [N, N]"""
     if E.size == 0:
         return np.zeros((0, 0), dtype=np.float32)
     En = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-12)
@@ -586,8 +590,9 @@ def _cosine_sim_matrix_np(E: np.ndarray) -> np.ndarray:
 
 def _safe_kmeans_cosine(E: np.ndarray, n_clusters: int, random_state: int = 42) -> np.ndarray:
     """
-    코사인 거리 기반 군집화를 위해 L2 정규화 후 유클리드 KMeans 수행(spherical k-means 근사).
-    반환: 각 벡터의 cluster id, shape [N]
+    Perform Euclidean KMeans after L2 normalization
+    to approximate cosine-distance clustering.
+    Return: cluster id of each vector, shape [N]
     """
     if E.shape[0] == 0:
         return np.empty((0,), dtype=np.int32)
@@ -603,8 +608,9 @@ def _topm_unique_by_label_from_scores(
     min_score: Optional[float] = 0.0,
 ) -> List[int]:
     """
-    점수 상위부터 훑으면서 '라벨 중복 없이' 최대 m개 텍스트 인덱스 선택.
-    반환: 선택된 text 인덱스 리스트
+    Scan from the highest score and select up to m text indices
+    without label duplication.
+    Return: selected text index list
     """
     if torch.is_tensor(scores_1d):
         s = scores_1d.detach().cpu().numpy().astype(np.float32)
@@ -627,7 +633,7 @@ def _topm_unique_by_label_from_scores(
     return chosen
 
 # ---------------------
-# 모델 빌드 함수
+# Model build function
 # ---------------------
 def build_model(
     device: str,
@@ -637,7 +643,7 @@ def build_model(
 ):
     token_model = Token(outputdim=1024, classifier_num=81313, mode='train').to(device)
 
-    # backbone freeze
+    # Freeze backbone
     for name, p in token_model.named_parameters():
         if name.startswith("backbone"):
             p.requires_grad = False
@@ -677,7 +683,7 @@ def build_model(
     return vt, token_model
 
 # ---------------------
-# 학습 루프
+# Training loop
 # ---------------------
 def main_train(
     image_size=image_size,
@@ -805,7 +811,7 @@ def main_train(
                 elif isinstance(batch_img, dict) and "images" in batch_img:
                     images_t = batch_img["images"]
                 else:
-                    raise TypeError("batch_img에서 images 텐서를 찾을 수 없다.")
+                    raise TypeError("Cannot find images tensor in batch_img.")
 
                 device_t = next(vt.parameters()).device
                 images_t = images_t.to(device_t, non_blocking=True)
@@ -860,7 +866,7 @@ def main_train(
     save_weights(vt, token_model, optimizer, scaler, epoch=EPOCHS, global_step=global_step, tag="last", save_full_state=save_full_state)
 
 # ---------------------
-# 추론 + (NEW) 클러스터링
+# Inference + clustering
 # ---------------------
 @torch.no_grad()
 def run_infer(
@@ -911,9 +917,9 @@ def run_infer(
                 image_tensors.append(tfm(im))
                 valid_paths.append(p)
         except Exception as e:
-            print(f"[Warn] 이미지 열기 실패: {p} ({e})")
+            print(f"[Warn] Failed to open image: {p} ({e})")
     if len(image_tensors) == 0:
-        print("[Infer] 사용할 이미지가 없습니다.")
+        print("[Infer] No usable images found.")
         return
     images = torch.stack(image_tensors, dim=0).to(device, non_blocking=True)
 
@@ -938,15 +944,15 @@ def run_infer(
 
         with torch.no_grad():
             with ctx:
-                scores = _forward_scores(vt, images, input_ids, attention_mask)  # [B, cur]
-                t_emb = vt.encode_texts(input_ids, attention_mask)               # [cur, D]
+                scores = _forward_scores(vt, images, input_ids, attention_mask)
+                t_emb = vt.encode_texts(input_ids, attention_mask)
             text_embs_all[start:end, :] = t_emb.detach().cpu().to(torch.float32).numpy()
 
         all_scores[:, start:end] = scores
         start = end
 
     # ============================================== #
-    #   기존: 라벨 중복 없이 Top-K 가중 평균(fused_vec)
+    #   Existing method: weighted average of Top-K without duplicated labels
     # ============================================== #
     fused_vecs = []
     meta_all = {}
@@ -997,17 +1003,17 @@ def run_infer(
     print(f"[Fuse] saved meta json: {meta_path}")
 
     # ============================
-    #  🔷 (NEW) Top-10 → KMeans(k=4) 클러스터링
+    #  Top-10 to KMeans(k=4) clustering
     # ============================
     TOP_M_FOR_CLUSTER = 10
     N_CLUSTERS = 4
-    min_pos_score = 0.0  # 0.0: 양수 점수만 허용 / None: 임계 해제
+    min_pos_score = 0.0
 
     clusters_json = {}
-    clusters_csv_rows = []  # [image, cluster_id, rank_in_cluster, text_index, label, score, text]
+    clusters_csv_rows = []
 
-    for i, img_path in enumerate(tqdm(valid_paths, desc="Clustering(top10→k=4)")):
-        # 1) 이 이미지의 Top-10(라벨 중복 없음)
+    for i, img_path in enumerate(tqdm(valid_paths, desc="Clustering(top10_to_k4)")):
+        # 1) Top-10 for this image without label duplication
         text_idx_list = _topm_unique_by_label_from_scores(
             scores_1d=all_scores[i],
             labels_of_texts=labels_of_texts,
@@ -1020,23 +1026,23 @@ def run_infer(
             clusters_json[img_key] = {"clusters": [], "note": "no positive candidates"}
             continue
 
-        # 2) 선택 텍스트 임베딩/라벨/점수/문자열
-        E = text_embs_all[text_idx_list, :]  # [n, D]
+        # 2) Selected text embeddings, labels, scores, and text strings
+        E = text_embs_all[text_idx_list, :]
         lbls = [int(labels_of_texts[t]) for t in text_idx_list]
         txts = [texts[t] for t in text_idx_list]
         scores_this = all_scores[i].detach().cpu().numpy().astype(np.float32)[text_idx_list]
 
-        # (옵션) 유사도 행렬 사용 가능
+        # Optional similarity matrix
         # sim_mat = _cosine_sim_matrix_np(E)
 
-        # 3) Spherical KMeans 근사(k=4, 샘플수<4면 축소)
-        cids = _safe_kmeans_cosine(E, n_clusters=N_CLUSTERS)  # [n]
+        # 3) Spherical KMeans approximation
+        cids = _safe_kmeans_cosine(E, n_clusters=N_CLUSTERS)
 
-        # 4) 클러스터별 정리
+        # 4) Organize by cluster
         group = defaultdict(list)
         for r, (ti, lab, sc, tx, cid) in enumerate(zip(text_idx_list, lbls, scores_this, txts, cids)):
             group[int(cid)].append({
-                "rank_in_selection": r + 1,   # Top-10 내의 순위
+                "rank_in_selection": r + 1,
                 "text_index": int(ti),
                 "label": int(lab),
                 "score": float(sc),
@@ -1057,7 +1063,7 @@ def run_infer(
             "clusters": clusters_out,
         }
 
-    # 5) 저장
+    # 5) Save outputs
     clusters_json_path = os.path.join(fused_outdir, f"clusters_top{TOP_M_FOR_CLUSTER}_k{N_CLUSTERS}.json")
     with open(clusters_json_path, "w", encoding="utf-8") as f:
         json.dump(clusters_json, f, ensure_ascii=False, indent=2)
@@ -1073,7 +1079,7 @@ def run_infer(
     print(f"[Cluster] saved CSV  -> {clusters_csv_path}")
 
 # ---------------------
-# JSONL → 경로 유틸
+# JSONL to path utilities
 # ---------------------
 def _extract_name_by_regex(p: str) -> str:
     m = re.search(r"/([^/]+)\.", p)
@@ -1099,35 +1105,35 @@ def _load_image_paths_from_jsonl(path: str) -> List[str]:
     return out
 
 # ===================== #
-#    엔트리 포인트       #
+#    Entry point
 # ===================== #
 def build_argparser():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", type=str, default="train",
                     choices=["train", "infer", "both", "match"],
-                    help="train: 학습, infer: 데모 추론, both: 학습 후 데모 추론, match: query/ref JSONL 매칭")
-    ap.add_argument("--ckpt_tag", type=str, default="last", help="(infer/match) 태그로 vt_/token_ 또는 train_state_ 로드")
-    ap.add_argument("--topk", type=int, default=5, help="각 이미지별 상위 출력 라벨 개수(라벨 중복 없음)")
-    ap.add_argument("--text_batch", type=int, default=256, help="추론 시 텍스트 배치 크기")
+                    help="train: training, infer: demo inference, both: training followed by demo inference, match: query/ref JSONL matching")
+    ap.add_argument("--ckpt_tag", type=str, default="last", help="Load vt_/token_ or train_state_ using this tag for infer or match")
+    ap.add_argument("--topk", type=int, default=5, help="Number of top labels per image without label duplication")
+    ap.add_argument("--text_batch", type=int, default=256, help="Text batch size during inference")
     ap.add_argument("--infer_images", type=str, default="/root/project/llm_prompt/test_crime",
-                    help="추론용 이미지 경로(쉼표/공백 구분) 또는 글롭 패턴. 미지정 시 items_img.jsonl 일부로 데모")
-    ap.add_argument("--max_demo_images", type=int, default=1000, help="infer_images 미지정 시 데모에 사용할 이미지 수")
+                    help="Inference image path, whitespace-separated paths, or glob pattern; if omitted, a subset from items_img.jsonl is used")
+    ap.add_argument("--max_demo_images", type=int, default=1000, help="Number of demo images to use when infer_images is not specified")
 
-    ap.add_argument("--query_jsonl", type=str, default="", help="(match) query 이미지 목록 JSONL 경로")
-    ap.add_argument("--ref_jsonl",   type=str, default="", help="(match) ref   이미지 목록 JSONL 경로")
-    ap.add_argument("--desc_sim", type=int, default=1, help="1이면 유사도 내림차순 정렬")
-    ap.add_argument("--log_topk", type=int, default=5, help="log_print에서 표시할 Top-K")
+    ap.add_argument("--query_jsonl", type=str, default="", help="Query image list JSONL path for match mode")
+    ap.add_argument("--ref_jsonl",   type=str, default="", help="Reference image list JSONL path for match mode")
+    ap.add_argument("--desc_sim", type=int, default=1, help="If set to 1, sort by descending similarity")
+    ap.add_argument("--log_topk", type=int, default=5, help="Top-K to display in log_print")
 
-    ap.add_argument("--resume_path", type=str, default="", help="직접 지정한 train_state_*.pt 경로")
-    ap.add_argument("--resume_tag", type=str, default="", help="CKPT_DIR/train_state_{TAG}.pt 로드")
-    ap.add_argument("--resume_all", type=int, default=0, help="1이면 optimizer/scaler까지 함께 로드")
+    ap.add_argument("--resume_path", type=str, default="", help="Direct path to train_state_*.pt")
+    ap.add_argument("--resume_tag", type=str, default="", help="Load CKPT_DIR/train_state_{TAG}.pt")
+    ap.add_argument("--resume_all", type=int, default=0, help="If set to 1, also load optimizer and scaler state")
 
-    ap.add_argument("--vt_ckpt_path", type=str, default="/root/project/llm_prompt/llm_machine/checkpoint_siglip/vt_epoch040_rgb_cluster.pt", help="vt_*.pt 등 개별 가중치 파일 경로")
-    ap.add_argument("--token_ckpt_path", type=str, default="/root/project/llm_prompt/llm_machine/checkpoint_siglip/token_epoch040_rgb_cluster.pt", help="token_*.pt 등 개별 가중치 파일 경로")
-    ap.add_argument("--strict_load", type=int, default=0, help="1이면 state_dict strict 로드")
+    ap.add_argument("--vt_ckpt_path", type=str, default="/root/project/llm_prompt/llm_machine/checkpoint_siglip/vt_epoch040_rgb_cluster.pt", help="Path to individual vt weights")
+    ap.add_argument("--token_ckpt_path", type=str, default="/root/project/llm_prompt/llm_machine/checkpoint_siglip/token_epoch040_rgb_cluster.pt", help="Path to individual token weights")
+    ap.add_argument("--strict_load", type=int, default=0, help="If set to 1, use strict state_dict loading")
 
     ap.add_argument("--save_full_state", type=int, default=1,
-                    help="1이면 train_state_*.pt도 함께 저장, 0이면 vt/token만 저장")
+                    help="If set to 1, save train_state_*.pt together with vt and token; otherwise save only vt and token")
     return ap
 
 if __name__ == "__main__":
