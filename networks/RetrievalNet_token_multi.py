@@ -188,42 +188,6 @@ class Token_Refine(nn.Module):
         token = self.token_norm(token)
         for decoder in self.decoder:
             token, attns_map = decoder(token, x)
-
-        # # Attention Map 저장.
-        # if attn_save:
-        #     # 저장할 디렉토리
-        #     import os
-        #     import matplotlib.pyplot as plt
-        #     import numpy as np
-
-        #     os.makedirs(attn_root, exist_ok=True)
-
-        #     # 가정: attn = attention[0] → shape: [num_heads, num_tokens, 1024]
-        #     B, num_heads, num_tokens, spatial_size = attns_map.shape
-        #     H_feat = W_feat = int(spatial_size ** 0.5)
-        #     H_img, W_img = 1024, 1024
-
-        #     attn = attns_map[0]  # [num_heads, num_tokens, 1024]
-
-        #     for token_idx in range(num_tokens):
-        #         for head_idx in range(num_heads):
-        #             # 1. [1024] → [32, 32]
-        #             attn_map = attn[head_idx, token_idx].reshape(H_feat, W_feat)
-
-        #             # 2. Normalize
-        #             attn_map -= attn_map.min()
-        #             attn_map /= (attn_map.max() + 1e-8)
-
-        #             # 3. Upsample to 1024x1024
-        #             attn_map_up = F.interpolate(
-        #                 attn_map.unsqueeze(0).unsqueeze(0), size=(H_img, W_img),
-        #                 mode='bilinear', align_corners=False
-        #             ).squeeze().detach().cpu().numpy()
-
-        #             os.makedirs(os.path.join(attn_root, file_name), exist_ok=True)
-        #             np.save(os.path.join(attn_root, file_name, f"token{token_idx}_head{head_idx}.npy"), attn_map_up)
-        # token = self.proj(token.reshape(B, -1))
-
         return token
 
 
