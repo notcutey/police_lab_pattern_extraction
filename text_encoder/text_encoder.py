@@ -1,4 +1,4 @@
-# vt_siglip/text_encoder.py
+# vt_siglip/text_encoder.py/
 import os
 import torch
 import torch.nn as nn
