@@ -36,19 +36,19 @@ def emm_log_print(sorted_indices, sorted_distances, query_order, ref_indices, ar
 
     print(query_order)
 
-    ONE_PCNT = int(gt_len * 0.01) # top 1
-    FIVE_PCNT = int(gt_len * 0.05) # top 5
-    TEN_PCNT = int(gt_len * 0.1) # top 10
-    TOP_50 = 20 # top_50
+    ONE_PCNT = int(gt_len * 0.01) # top 1%
+    FIVE_PCNT = int(gt_len * 0.05) # top 5%
+    TEN_PCNT = int(gt_len * 0.1) # top 10%
+    TOP_50 = 20 # top 50
 
     for qidx, (top_ranks, top_distances, query_file_name) in tqdm(enumerate(zip(sorted_indices, sorted_distances, query_order))):
-        gt_file_name = df[df['cropped'] == query_file_name]['gt'].iloc[0]  # 첫 번째 일치하는 값 가져오기
+        gt_file_name = df[df['cropped'] == query_file_name]['gt'].iloc[0]  # get the first matching value
         gt_indices = [ref_indices[gt_label] for gt_label in ast.literal_eval(gt_file_name)]
 
         emm_top100 = ast.literal_eval(emm_csv[emm_csv['cropped'] == query_file_name]['gt'].iloc[0])
         emm_top100_indices = list(map(lambda x: ref_indices[x], emm_top100))
 
-         # 문양이 50개 이상이 아닐 때도 있음
+        # The number of pattern candidates may be fewer than 100
         if len(emm_top100_indices) < 100:
             for top_idx in top_ranks:
                 if top_idx not in emm_top100_indices:
@@ -62,21 +62,20 @@ def emm_log_print(sorted_indices, sorted_distances, query_order, ref_indices, ar
         sorted_indices = torch.argsort(selected_values)
         ensemble_indices = emm_top100_indices[sorted_indices]
 
-        # top-1%, top-50 개 추출
+        # Extract top-1% and top-50 candidates
         top1pct_list = emm_top100_indices[:ONE_PCNT]
         top50_list = emm_top100_indices[:TOP_50]
 
-        # top index에 있으면 카운팅
+        # Count as correct if a ground-truth index is included in the top indices
         flag1, flag2 = False, False
         for gt_index in gt_indices:
             emm_involve_index = (ensemble_indices == gt_index).nonzero(as_tuple=True)[0]
             if len(emm_involve_index) and emm_involve_index <= ONE_PCNT and not flag1:
                 flag1 = True
                 count_1pct += 1
-            if  len(emm_involve_index) and emm_involve_index <= TOP_50 and not flag2:
+            if len(emm_involve_index) and emm_involve_index <= TOP_50 and not flag2:
                 flag2 = True
                 count_50 += 1
-
 
         total += 1
 
@@ -97,18 +96,21 @@ def emm_log_print(sorted_indices, sorted_distances, query_order, ref_indices, ar
 
     return [(count_1pct / total) * 100, (count_5pct / total) * 100, (count_10pct / total) * 100, (count_50 / total) * 100]
 
+
 def safe_literal_eval(text):
     """
-    문자열에서 리스트 형태([ ... ])만 추출한 뒤 literal_eval로 안전하게 파싱.
-    실패 시 빈 리스트 반환.
+    Safely extract only the list-formatted part ([ ... ]) from a string
+    and parse it using literal_eval.
+    Returns an empty list if parsing fails.
     """
     try:
         clean = re.findall(r"\[[^\[\]]+\]", text)
         if clean:
             return ast.literal_eval(clean[0])
     except Exception as e:
-        print("⚠️ ast.literal_eval 실패:", text)
+        print("⚠️ ast.literal_eval failed:", text)
     return []
+
 
 def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_names=None, args=None):
     start_time_stamp = strftime("%m-%d_%H%M", localtime())
@@ -131,10 +133,10 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
 
     count_1pct, count_5pct, count_10pct, count_50, total = [0] * 5
 
-    ONE_PCNT = int(gt_len * 0.01) # top 1
-    FIVE_PCNT = int(gt_len * 0.05) # top 5
-    TEN_PCNT = int(gt_len * 0.1) # top 10
-    TOP_50 = 50 # top_50
+    ONE_PCNT = int(gt_len * 0.01) # top 1%
+    FIVE_PCNT = int(gt_len * 0.05) # top 5%
+    TEN_PCNT = int(gt_len * 0.1) # top 10%
+    TOP_50 = 50 # top 50
 
     csv_file = 'PL_totalref_top50_results.csv'
     cnt = 0
@@ -143,7 +145,7 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
     # writer.writerow(['filename', 'top_50_indices', 'top_50_distances'])
     for qidx, (top_ranks, top_distances, query_file_name) in tqdm(enumerate(zip(sorted_indices, sorted_distances, query_order))):
         try:
-            gt_file_name = df[df['cropped'] == query_file_name]['gt'].iloc[0]  # 첫 번째 일치하는 값 가져오기
+            gt_file_name = df[df['cropped'] == query_file_name]['gt'].iloc[0]  # get the first matching value
         except:
             cnt += 1
             continue
@@ -151,14 +153,13 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
         print(gt_file_name)
         gt_indices = [ref_indices[gt_label] for gt_label in ast.literal_eval(gt_file_name)]
 
-
         top1pct_list = top_ranks[:ONE_PCNT]
         top5pct_list = top_ranks[:FIVE_PCNT]
         top10pct_list = top_ranks[:TEN_PCNT]
-        top50_list = top_ranks[:TOP_50] # 0 부터
+        top50_list = top_ranks[:TOP_50] # starts from index 0
 
         top50_distances = top_distances[:TOP_50]
-        # top index에 있으면 카운팅
+        # Count as correct if a ground-truth index is included in the top indices
         flag1, flag2, flag3, flag4 = False, False, False, False
         for gt_index in gt_indices:
             involve_index = (top_ranks == gt_index).nonzero(as_tuple=True)[0]
@@ -200,7 +201,7 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
         # min_val = values[0] - 0.05
         # max_val = values[-1] + 0.01
 
-        # # 백분위수 계산
+        # Calculate percentile-based similarity
         # similarity = [(value - min_val) / (max_val - min_val) * 100 for value in values][::-1]
 
         # top50_filenames = list(map(lambda x: list(ref_indices.keys())[x], top50_list.cpu().tolist()))
@@ -228,5 +229,5 @@ def log_print(sorted_indices, sorted_distances, query_order, ref_indices, ref_na
     # df = pd.DataFrame({'cropped': names, 'gt': lists})
     # df.to_csv('retrieval_results_top100.csv', index=False)
 
-    print('불발', cnt)
+    print('missed cases', cnt)
     return [(count_1pct / total) * 100, (count_5pct / total) * 100, (count_10pct / total) * 100, (count_50 / total) * 100]
