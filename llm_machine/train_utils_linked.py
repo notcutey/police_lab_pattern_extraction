@@ -14,11 +14,11 @@ def train_step_linked(
     model.train()
     device = next(model.parameters()).device
 
-    # 이미지/타깃만 모델 디바이스로 이동
+    # Move only images and targets to the model device
     images = batch_img.images.to(device, non_blocking=True)
     targets = build_targets_imgmulti_textsingle(batch_img.label_sets, batch_txt.labels).to(device)
 
-    # 텍스트 텐서는 LLMTextEncoder.encode_text 내부에서 실제 LLM 디바이스로 이동됨
+    # Text tensors are moved to the actual LLM device inside LLMTextEncoder.encode_text
     input_ids = batch_txt.input_ids
     attention_mask = batch_txt.attention_mask
 
@@ -38,7 +38,7 @@ def train_step_linked(
         loss.backward()
         optimizer.step()
 
-    # "temperature" 또는 "temp" 키 모두 지원
+    # Support both "temperature" and "temp" keys
     temp_tensor = out.get("temperature", out.get("temp", None))
     if temp_tensor is None:
         temp_tensor = model.log_temp.exp()
