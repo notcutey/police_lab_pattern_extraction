@@ -6,7 +6,7 @@ from .data_linked import ImageBatchMulti, TextBatchSingle, build_targets_imgmult
 
 def train_step_linked(
     model: VisionTextSigLIP,
-    token_model,                      # ✅ 새로 추가: 외부 Token 모델
+    token_model,
     batch_img: ImageBatchMulti,
     batch_txt: TextBatchSingle,
     optimizer: torch.optim.Optimizer,
@@ -14,26 +14,26 @@ def train_step_linked(
     amp_dtype: torch.dtype = torch.bfloat16,
 ) -> dict:
     """
-    ✅ Token(vision)과 VT(text+proj)를 완전히 분리한 학습 스텝.
-    - Token: forward_test 로 image_feats 추출 (no_grad + frozen)
-    - VT: image_feats + text 로 contrastive / ASL 학습
+    Training step with Token (vision) and VT (text + projection) fully separated.
+    - Token: extract image_feats using forward_test (no_grad + frozen)
+    - VT: train contrastive / ASL using image_feats + text
     """
     model.train()
     device = next(model.parameters()).device
 
-    # 1) 이미지 텐서를 Token 디바이스로 이동
+    # Move image tensor to the Token device
     images = batch_img.images.to(device, non_blocking=True)
 
-    # 2) Token 모델로 feature 추출 (학습/grad 없음)
+    # Extract features using the Token model without training or gradients
     with torch.no_grad():
-        image_feats = token_model.forward_test(images)    # (B, Dv)
-    # 3) 멀티라벨 타깃 생성 (B, M)
+        image_feats = token_model.forward_test(images)
+    # Build multi-label targets with shape (B, M)
     targets = build_targets_imgmulti_textsingle(batch_img.label_sets, batch_txt.labels).to(
         device
     )
 
-    # 텍스트 텐서는 LLMTextEncoder 내부에서 실제 디바이스로 옮겨지지만,
-    # 여기서는 CPU 텐서를 그대로 넣어도 됨.
+    # Text tensors are moved to the actual device inside LLMTextEncoder,
+    # so CPU tensors can be passed directly here.
     input_ids = batch_txt.input_ids
     attention_mask = batch_txt.attention_mask
 
@@ -53,7 +53,7 @@ def train_step_linked(
         loss.backward()
         optimizer.step()
 
-    # "temperature" 또는 "temp" 키 모두 지원
+    # Support both "temperature" and "temp" keys
     temp_tensor = out.get("temperature", out.get("temp", None))
     if temp_tensor is None:
         temp_tensor = model.log_temp.exp()
